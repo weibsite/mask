@@ -60,6 +60,24 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+        /* Gauge Slider */
+        .gauge-track {
+            background: linear-gradient(to right, #374151, #374151);
+            height: 6px;
+            border-radius: 3px;
+            position: relative;
+        }
+        .gauge-thumb {
+            width: 10px;
+            height: 10px;
+            background-color: #38bdf8;
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute;
+            top: -2px;
+            transform: translateX(-50%);
+            transition: left 0.5s ease;
+        }
     </style>
 </head>
 <body>
@@ -104,7 +122,7 @@
             const [posts, setPosts] = useState([]);
             const [userInfo, setUserInfo] = useState(null);
             const [loading, setLoading] = useState(false);
-            const [lastUpdated, setLastUpdated] = useState(null);
+            const [lastUpdated, setLastUpdated] = useState(null); // 上次主數據更新時間
             const [currentTime, setCurrentTime] = useState(new Date());
             const [dataSource, setDataSource] = useState("init"); 
             const [showControls, setShowControls] = useState(false); // Default Hidden
@@ -114,6 +132,7 @@
             
             // 獨立的「最新發文數」狀態
             const [specialCount, setSpecialCount] = useState(null);
+            const [specialLastFetchTime, setSpecialLastFetchTime] = useState(null); // 獨立計數的下載時間
             const prevSpecialCountRef = useRef(null);
 
             // --- Time Setup ---
@@ -134,15 +153,14 @@
                     const startDate = new Date();
                     startDate.setDate(startDate.getDate() - 90); 
 
+                    // 加隨機數避免快取
                     const postsTarget = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
-                    const postsUrl = `${corsURL}${encodeURIComponent(postsTarget)}`;
+                    const postsUrl = `${corsURL}${encodeURIComponent(postsTarget)}&_t=${Date.now()}`;
                     
                     const postsRes = await fetch(postsUrl);
 
                     if (!postsRes.ok) {
                          if (postsRes.status === 403) {
-                             // Only show auth modal if using cors-anywhere, but here we try to be silent first
-                             // If fail, we might switch method or show controls
                              setShowControls(true); 
                          }
                          throw new Error(`連線錯誤 HTTP ${postsRes.status}`);
@@ -184,15 +202,25 @@
             useEffect(() => {
                 const fetchSpecialData = async () => {
                     const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
-                    // Using corsproxy.io as primary
-                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+                    // Using corsproxy.io as primary, adding timestamp to avoid cache
+                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
                     
                     try {
-                        const response = await fetch(proxyUrl);
+                        const response = await fetch(proxyUrl, {
+                            // Headers are mostly stripped by proxy/browser but kept for best effort
+                            "headers": {
+                                "accept": "application/json",
+                                "cache-control": "no-cache",
+                                "pragma": "no-cache"
+                            },
+                            "method": "GET"
+                        });
+
                         if (response.ok) {
                             const json = await response.json();
                             if (json.success && Array.isArray(json.data)) {
                                 const newCount = json.data.length;
+                                
                                 if (prevSpecialCountRef.current !== null && newCount !== prevSpecialCountRef.current) {
                                     setIsNewPost(true);
                                     setTimeout(() => setIsNewPost(false), 2000); 
@@ -200,6 +228,7 @@
                                 }
                                 prevSpecialCountRef.current = newCount;
                                 setSpecialCount(newCount);
+                                setSpecialLastFetchTime(new Date()); // 記錄實際下載時間
                             } else {
                                 setSpecialCount(0);
                             }
@@ -207,7 +236,6 @@
                             setSpecialCount("N/A");
                         }
                     } catch (error) {
-                        // Silent fail for special counter to avoid spamming
                         setSpecialCount("N/A");
                     }
                 };
@@ -298,7 +326,7 @@
             // Stats 1: Historical Cycle Rate (Baseline)
             const historicalStats = useMemo(() => {
                 if (posts.length === 0) return {};
-                const windows = [1, 6, 12, 24];
+                const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; // hours for 1h, 6h, 12h, 1d...7d
                 const res = {};
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
                 
@@ -323,7 +351,7 @@
                 return res;
             }, [posts]);
 
-            // Stats 2: Real-time vs History Comparison (Deep History 4 Weeks)
+            // Stats 2: Real-time vs History Comparison (Expanded to 7 days)
             const realTimeComparison = useMemo(() => {
                 if (posts.length === 0) return null;
                 const now = new Date();
@@ -336,32 +364,55 @@
                     }).length;
                 };
 
-                const windows = [1, 6, 12, 24];
+                // Map keys: 1h, 6h, 12h, 1d, 2d, 3d, 4d, 5d, 6d, 7d
+                const windowKeys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
                 const data = {};
 
-                windows.forEach(h => {
+                windowKeys.forEach(h => {
                     const current = getCountInWindow(now, h);
-                    const w1 = getCountInWindow(new Date(now.getTime() - 7 * 24 * 3600 * 1000), h);
-                    const w2 = getCountInWindow(new Date(now.getTime() - 14 * 24 * 3600 * 1000), h);
-                    const w3 = getCountInWindow(new Date(now.getTime() - 21 * 24 * 3600 * 1000), h);
-                    const w4 = getCountInWindow(new Date(now.getTime() - 28 * 24 * 3600 * 1000), h);
-
-                    data[h] = { current, history: [w1, w2, w3, w4] };
+                    const history = [];
+                    // Look back 1 to 7 days (not weeks, as per typical tactical analysis, but user asked for "History Back" 1-7 days ago comparison?)
+                    // User said: "History back 24H -> 1 Day, add 2-7 days". Usually this means comparing "Current 1D count" vs "1D count 1 day ago".
+                    // Let's assume comparisons are: 
+                    // Current Window (e.g. 1H) vs Same Window 1 day ago, 2 days ago... 7 days ago.
+                    for(let d=1; d<=7; d++) {
+                        history.push(getCountInWindow(new Date(now.getTime() - d * 24 * 3600 * 1000), h));
+                    }
+                    data[h] = { current, history };
                 });
 
                 return data;
             }, [posts, currentTime]);
 
-            // Stats 3: Velocity & Ratio (Current vs Historical Avg)
+            // Stats 3: Velocity & Ratio (Current vs Historical Avg) with Gauge Logic
             const velocityStats = useMemo(() => {
                 if (!historicalStats[1] || !realTimeComparison) return {};
                 const res = {};
-                [1, 6, 12, 24].forEach(h => {
+                // Keys for 1h, 6h, 12h, 1d...7d
+                const keys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
+                
+                keys.forEach(h => {
                     const current = realTimeComparison[h].current;
-                    const avg = historicalStats[h].avg;
-                    const diff = current - avg;
-                    const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
-                    res[h] = { current, avg: avg.toFixed(1), diff: diff.toFixed(1), ratio: ratio.toFixed(0) };
+                    const stats = historicalStats[h];
+                    const avg = stats.avg;
+                    
+                    // Calculate position percentage for gauge (0% = min, 50% = avg, 100% = max)
+                    // We map min->0, max->100.
+                    let pos = 0;
+                    if (stats.max > stats.min) {
+                        pos = ((current - stats.min) / (stats.max - stats.min)) * 100;
+                    } else if (current > 0) {
+                        pos = 100; // If min==max and >0
+                    }
+                    pos = Math.max(0, Math.min(100, pos)); // Clamp
+
+                    res[h] = { 
+                        current, 
+                        avg: avg.toFixed(1), 
+                        min: stats.min, 
+                        max: stats.max, 
+                        pos 
+                    };
                 });
                 return res;
             }, [historicalStats, realTimeComparison]);
@@ -370,13 +421,13 @@
             const tacticalData = useMemo(() => {
                 if (posts.length < 2) return null; 
                 const sorted = [...posts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                const gaps = [];
-                for (let i = 0; i < sorted.length - 1; i++) {
-                    const diff = (new Date(sorted[i].createdAt) - new Date(sorted[i+1].createdAt)) / 3600000;
-                    if (diff > 0) gaps.push(diff);
-                }
                 const currentS = hoursSinceLast;
                 const calcP = (h) => {
+                    const gaps = [];
+                    for (let i = 0; i < sorted.length - 1; i++) {
+                        const diff = (new Date(sorted[i].createdAt) - new Date(sorted[i+1].createdAt)) / 3600000;
+                        if (diff > 0) gaps.push(diff);
+                    }
                     const denom = gaps.filter(g => g >= currentS).length;
                     if (denom === 0) return 0;
                     const num = gaps.filter(g => g >= currentS && g <= currentS + h).length;
@@ -395,30 +446,35 @@
             // --- UI Components ---
             const RateRow = ({ label, data }) => {
                 if (!data) return null;
-                const diffVal = parseFloat(data.diff);
-                const isHigh = diffVal > 0;
+                
+                // Color based on position: <20% blue (low), 20-80% green (normal), >80% red (high)
+                let barColor = "bg-emerald-500";
+                if (data.pos > 80) barColor = "bg-red-500";
+                else if (data.pos < 20) barColor = "bg-sky-500";
+
                 return (
-                    <div className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
-                        <div className="w-10 text-sm text-gray-400 font-medium">{label}</div>
+                    <div className="py-3 border-b border-gray-800 last:border-0">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-sm text-gray-400 font-bold w-12">{label}</span>
+                            <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
+                        </div>
                         
-                        <div className="flex-1 px-1">
-                            <div className="flex justify-between items-end mb-1">
-                                <span className="text-xs text-gray-500">平均: {data.avg}</span>
-                                <span className="text-base font-bold text-white">{data.current}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-xs">
-                                <span className={`${isHigh ? 'text-red-400' : 'text-emerald-400'} flex items-center`}>
-                                    {isHigh ? '+' : ''}{data.diff} 
-                                    {isHigh ? <span className="text-[10px] ml-0.5">▲</span> : <span className="text-[10px] ml-0.5">▼</span>}
-                                </span>
-                                <span className={`font-mono text-sm ${parseInt(data.ratio) > 150 ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
-                                    {data.ratio}%
-                                </span>
-                            </div>
-                            {/* Visual Bar */}
-                            <div className="w-full bg-gray-800 h-1.5 mt-1.5 rounded overflow-hidden">
-                                <div className={`h-full ${isHigh ? 'bg-red-500' : 'bg-emerald-500'}`} style={{width: `${Math.min(parseInt(data.ratio)/2, 100)}%`}}></div>
-                            </div>
+                        <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
+                            <span>Min: {data.min}</span>
+                            <span className="text-gray-400">Avg: {data.avg}</span>
+                            <span>Max: {data.max}</span>
+                        </div>
+
+                        {/* Gauge / Slider Bar */}
+                        <div className="gauge-track w-full mt-1">
+                            {/* Gradient Background is set in CSS class */}
+                            <div 
+                                className="gauge-thumb shadow-lg" 
+                                style={{
+                                    left: `${data.pos}%`,
+                                    backgroundColor: data.pos > 80 ? '#ef4444' : (data.pos < 20 ? '#0ea5e9' : '#10b981')
+                                }}
+                            ></div>
                         </div>
                     </div>
                 );
@@ -428,14 +484,14 @@
                 if (!data) return null;
                 return (
                     <div className="py-2 border-b border-gray-800 last:border-0">
-                        <div className="flex justify-between items-center mb-1">
+                        <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
                             <span className="text-sm text-sky-400 font-bold w-10">{label}</span>
                             <span className="text-sm text-white font-mono bg-gray-800 px-1.5 rounded">{data.current}</span>
                         </div>
-                        <div className="grid grid-cols-4 gap-1 text-center">
+                        <div className="flex space-x-2 text-center pb-1">
                             {data.history.map((val, idx) => (
-                                <div key={idx} className="flex flex-col items-center bg-gray-900/50 rounded py-1">
-                                    <span className="text-[10px] text-gray-500">-{idx+1}W</span>
+                                <div key={idx} className="flex-shrink-0 flex flex-col items-center bg-gray-900/50 rounded py-1 w-12">
+                                    <span className="text-[9px] text-gray-500">-{idx+1}天</span>
                                     <span className={`text-xs font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>
                                         {val}
                                     </span>
@@ -526,13 +582,18 @@
                                 <div className="grid grid-cols-2 gap-4">
                                     {/* Left: Silence Time */}
                                     <div className="stat-divider pr-4">
-                                        <div className="text-gray-400 text-[10px] uppercase tracking-widest mb-1">目前靜默時間 (Silence)</div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <div className="text-gray-400 text-[10px] uppercase tracking-widest">目前靜默 (Silence)</div>
+                                        </div>
                                         <div className={`text-4xl font-bold font-mono my-1 ${hoursSinceLast > 6 ? 'text-red-400' : 'text-white'}`}>
                                             {hoursSinceLast.toFixed(2)}<span className="text-sm text-gray-500 ml-1">hr</span>
                                         </div>
-                                        <div className="flex items-center text-xs mt-1 space-x-1">
-                                            <div className={`w-1.5 h-1.5 rounded-full ${hoursSinceLast > 6 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                            <span className={tacticalData?.statusColor || 'text-gray-300'}>{tacticalData?.status}</span>
+                                        {/* New: Last Post Time */}
+                                        <div className="text-[10px] text-gray-400 flex items-center">
+                                            <span className="mr-1">Latest:</span>
+                                            <span className="font-mono text-sky-400">
+                                                {lastPostTime ? lastPostTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: false}) : '--'}
+                                            </span>
                                         </div>
                                     </div>
                                     
@@ -543,9 +604,12 @@
                                             {specialCount !== null ? specialCount : "--"}
                                             <span className="text-sm text-gray-500 ml-1">篇</span>
                                         </div>
-                                        <div className="flex items-center text-xs mt-1 text-sky-500">
-                                            <Zap className={`w-3 h-3 mr-1 ${isNewPost ? 'animate-bounce' : ''}`} />
-                                            <span>{isNewPost ? '更新中...' : '即時獨立監控'}</span>
+                                        {/* New: Download Time */}
+                                        <div className="flex items-center text-[10px] text-gray-500 mt-1">
+                                            <Zap className={`w-3 h-3 mr-1 ${isNewPost ? 'animate-bounce text-sky-400' : ''}`} />
+                                            <span>
+                                                {specialLastFetchTime ? `更新於 ${specialLastFetchTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false})}` : '等待數據...'}
+                                            </span>
                                         </div>
                                     </div>
                                 </div>
@@ -568,35 +632,47 @@
 
                             {/* 5. SPLIT VIEW: Velocity & Ratio vs Deep History Comparison */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* Left Column: Velocity & Ratio (Current vs Avg) */}
+                                {/* Left Column: Velocity & Ratio (Current vs Avg/Min/Max) */}
                                 <div className="mobile-card px-4 py-2">
                                     <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center">
                                         <Trending className="w-3 h-3 mr-1" />
-                                        速率強度 (Velocity Ratio)
+                                        速率強度 (Range Position)
                                     </h3>
                                     {velocityStats[1] && (
                                         <>
                                             <RateRow label="1H" data={velocityStats[1]} />
                                             <RateRow label="6H" data={velocityStats[6]} />
                                             <RateRow label="12H" data={velocityStats[12]} />
-                                            <RateRow label="24H" data={velocityStats[24]} />
+                                            <RateRow label="1天" data={velocityStats[24]} />
+                                            <RateRow label="2天" data={velocityStats[48]} />
+                                            <RateRow label="3天" data={velocityStats[72]} />
+                                            <RateRow label="4天" data={velocityStats[96]} />
+                                            <RateRow label="5天" data={velocityStats[120]} />
+                                            <RateRow label="6天" data={velocityStats[144]} />
+                                            <RateRow label="7天" data={velocityStats[168]} />
                                         </>
                                     )}
                                 </div>
 
-                                {/* Right Column: Deep History Comparison (-1W to -4W) */}
+                                {/* Right Column: Deep History Comparison (1-7 Days) */}
                                 <div className="mobile-card px-4 py-2 overflow-x-auto hide-scroll">
-                                    <div className="min-w-[280px]">
+                                    <div className="min-w-[320px]">
                                         <h3 className="text-sm text-sky-500 uppercase mt-2 mb-1 flex items-center justify-between">
-                                            <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史回推比較 (4 Weeks)</div>
-                                            <div className="text-[9px] text-gray-600">Now vs History</div>
+                                            <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史回推 (1~7 Days)</div>
+                                            <div className="text-[9px] text-gray-600">Now vs Past</div>
                                         </h3>
                                         {realTimeComparison && (
                                             <>
                                                 <HistoryCompareRow label="1H" data={realTimeComparison[1]} />
                                                 <HistoryCompareRow label="6H" data={realTimeComparison[6]} />
                                                 <HistoryCompareRow label="12H" data={realTimeComparison[12]} />
-                                                <HistoryCompareRow label="24H" data={realTimeComparison[24]} />
+                                                <HistoryCompareRow label="1天" data={realTimeComparison[24]} />
+                                                <HistoryCompareRow label="2天" data={realTimeComparison[48]} />
+                                                <HistoryCompareRow label="3天" data={realTimeComparison[72]} />
+                                                <HistoryCompareRow label="4天" data={realTimeComparison[96]} />
+                                                <HistoryCompareRow label="5天" data={realTimeComparison[120]} />
+                                                <HistoryCompareRow label="6天" data={realTimeComparison[144]} />
+                                                <HistoryCompareRow label="7天" data={realTimeComparison[168]} />
                                             </>
                                         )}
                                     </div>
