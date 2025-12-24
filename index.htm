@@ -111,7 +111,6 @@
         );
 
         const Activity = (props) => <IconBase {...props} path={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />} />;
-        // Fixed: Use <g> wrapper
         const Clock = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></g>} />;
         const Terminal = (props) => <IconBase {...props} path={<g><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></g>} />;
         const RefreshCw = (props) => <IconBase {...props} path={<g><path d="M23 4v6h-6" /><path d="M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></g>} />;
@@ -129,6 +128,7 @@
         const MessageSquare = (props) => <IconBase {...props} path={<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />} />;
         const Target = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></g>} />;
         const Repeat = (props) => <IconBase {...props} path={<g><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></g>} />;
+        const Forward = (props) => <IconBase {...props} path={<g><polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" /></g>} />;
 
         const App = () => {
             // --- State ---
@@ -605,20 +605,42 @@
             }, [posts, hoursSinceLast]);
 
             // --- UI Components ---
-            const RateRow = ({ label, data, hours }) => {
+            const RateRow = ({ label, data, hours, remainingHours }) => {
                 if (!data) return null;
                 const ratioNum = parseInt(data.ratio);
                 const isHigh = ratioNum >= 100;
                 
                 // Calculate Avg/H (Current Speed)
                 const currentSpeed = (parseFloat(data.current) / hours).toFixed(1);
+                
+                // Calculate History Avg/H for comparison logic
+                const historyAvgSpeed = (parseFloat(data.avg) / hours);
+
+                // Speed comparison color logic
+                let speedColorClass = "text-gray-500"; 
+                const speedDiff = parseFloat(currentSpeed) - historyAvgSpeed;
+                
+                if (speedDiff > 0) {
+                    if (parseFloat(currentSpeed) > historyAvgSpeed * 1.2) speedColorClass = "text-red-500 font-bold"; 
+                    else speedColorClass = "text-orange-400"; 
+                } else if (speedDiff <= 0) {
+                     speedColorClass = "text-emerald-500"; 
+                }
+
+                // Estimated additional posts based on current speed
+                const estimatedMore = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours).toFixed(1) : "0.0";
 
                 return (
                     <div className="py-3 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <div className="flex items-center space-x-2">
-                                <div className="text-[10px] text-gray-500 font-mono bg-gray-900 px-1 rounded border border-gray-800">
+                                {/* Estimation Badge */}
+                                <div className="text-[9px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="依此速度預估剩餘發文數">
+                                    <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
+                                    +{estimatedMore}
+                                </div>
+                                <div className={`text-[10px] font-mono bg-gray-900 px-1 rounded border border-gray-800 ${speedColorClass}`}>
                                     {currentSpeed}/h
                                 </div>
                                 <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
@@ -833,16 +855,16 @@
                                     <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center"><Trending className="w-3 h-3 mr-1" /> 速率強度 (Range)</h3>
                                     {velocityStats[1] && (
                                         <>
-                                            <RateRow label="1H" hours={1} data={velocityStats[1]} />
-                                            <RateRow label="6H" hours={6} data={velocityStats[6]} />
-                                            <RateRow label="12H" hours={12} data={velocityStats[12]} />
-                                            <RateRow label="1天" hours={24} data={velocityStats[24]} />
-                                            <RateRow label="2天" hours={48} data={velocityStats[48]} />
-                                            <RateRow label="3天" hours={72} data={velocityStats[72]} />
-                                            <RateRow label="4天" hours={96} data={velocityStats[96]} />
-                                            <RateRow label="5天" hours={120} data={velocityStats[120]} />
-                                            <RateRow label="6天" hours={144} data={velocityStats[144]} />
-                                            <RateRow label="7天" hours={168} data={velocityStats[168]} />
+                                            <RateRow label="1H" hours={1} data={velocityStats[1]} remainingHours={hoursToTarget} />
+                                            <RateRow label="6H" hours={6} data={velocityStats[6]} remainingHours={hoursToTarget} />
+                                            <RateRow label="12H" hours={12} data={velocityStats[12]} remainingHours={hoursToTarget} />
+                                            <RateRow label="1天" hours={24} data={velocityStats[24]} remainingHours={hoursToTarget} />
+                                            <RateRow label="2天" hours={48} data={velocityStats[48]} remainingHours={hoursToTarget} />
+                                            <RateRow label="3天" hours={72} data={velocityStats[72]} remainingHours={hoursToTarget} />
+                                            <RateRow label="4天" hours={96} data={velocityStats[96]} remainingHours={hoursToTarget} />
+                                            <RateRow label="5天" hours={120} data={velocityStats[120]} remainingHours={hoursToTarget} />
+                                            <RateRow label="6天" hours={144} data={velocityStats[144]} remainingHours={hoursToTarget} />
+                                            <RateRow label="7天" hours={168} data={velocityStats[168]} remainingHours={hoursToTarget} />
                                         </>
                                     )}
                                 </div>
