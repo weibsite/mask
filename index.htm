@@ -62,21 +62,18 @@
         }
         /* Gauge Slider */
         .gauge-track {
-            background: linear-gradient(to right, #374151, #374151);
-            height: 6px;
-            border-radius: 3px;
+            background: #1f2937;
+            height: 8px;
+            border-radius: 4px;
             position: relative;
+            overflow: hidden;
         }
-        .gauge-thumb {
-            width: 10px;
-            height: 10px;
-            background-color: #38bdf8;
-            border: 2px solid white;
-            border-radius: 50%;
-            position: absolute;
-            top: -2px;
-            transform: translateX(-50%);
-            transition: left 0.5s ease;
+        .gauge-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            /* Gradient for health bar effect */
+            background: linear-gradient(90deg, #10b981 0%, #facc15 50%, #ef4444 100%);
         }
     </style>
 </head>
@@ -132,7 +129,8 @@
             
             // 獨立的「最新發文數」狀態
             const [specialCount, setSpecialCount] = useState(null);
-            const [specialLastFetchTime, setSpecialLastFetchTime] = useState(null); // 獨立計數的下載時間
+            const [specialLastFetchTime, setSpecialLastFetchTime] = useState(null);
+            const [loadingSpecial, setLoadingSpecial] = useState(false); // 獨立按鈕的 Loading 狀態
             const prevSpecialCountRef = useRef(null);
 
             // --- Time Setup ---
@@ -198,52 +196,54 @@
                 }
             }, []);
 
-            // --- 獨立的特殊計數 Fetch (每秒更新 + 觸發連動) ---
-            useEffect(() => {
-                const fetchSpecialData = async () => {
-                    const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
-                    // Using corsproxy.io as primary, adding timestamp to avoid cache
-                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
-                    
-                    try {
-                        const response = await fetch(proxyUrl, {
-                            // Headers are mostly stripped by proxy/browser but kept for best effort
-                            "headers": {
-                                "accept": "application/json",
-                                "cache-control": "no-cache",
-                                "pragma": "no-cache"
-                            },
-                            "method": "GET"
-                        });
+            // --- 獨立的特殊計數 Fetch (可手動觸發) ---
+            const fetchSpecialData = useCallback(async () => {
+                setLoadingSpecial(true);
+                const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
+                
+                try {
+                    const response = await fetch(proxyUrl, {
+                        "headers": {
+                            "accept": "application/json",
+                            "cache-control": "no-cache",
+                            "pragma": "no-cache"
+                        },
+                        "method": "GET"
+                    });
 
-                        if (response.ok) {
-                            const json = await response.json();
-                            if (json.success && Array.isArray(json.data)) {
-                                const newCount = json.data.length;
-                                
-                                if (prevSpecialCountRef.current !== null && newCount !== prevSpecialCountRef.current) {
-                                    setIsNewPost(true);
-                                    setTimeout(() => setIsNewPost(false), 2000); 
-                                    fetchFromApi(); 
-                                }
-                                prevSpecialCountRef.current = newCount;
-                                setSpecialCount(newCount);
-                                setSpecialLastFetchTime(new Date()); // 記錄實際下載時間
-                            } else {
-                                setSpecialCount(0);
+                    if (response.ok) {
+                        const json = await response.json();
+                        if (json.success && Array.isArray(json.data)) {
+                            const newCount = json.data.length;
+                            
+                            if (prevSpecialCountRef.current !== null && newCount !== prevSpecialCountRef.current) {
+                                setIsNewPost(true);
+                                setTimeout(() => setIsNewPost(false), 2000); 
+                                fetchFromApi(); // Trigger main update
                             }
+                            prevSpecialCountRef.current = newCount;
+                            setSpecialCount(newCount);
+                            setSpecialLastFetchTime(new Date());
                         } else {
-                            setSpecialCount("N/A");
+                            setSpecialCount(0);
                         }
-                    } catch (error) {
+                    } else {
                         setSpecialCount("N/A");
                     }
-                };
+                } catch (error) {
+                    setSpecialCount("N/A");
+                } finally {
+                    setLoadingSpecial(false);
+                }
+            }, [fetchFromApi]);
 
+            // Setup Interval for Special Fetch
+            useEffect(() => {
                 fetchSpecialData();
                 const interval = setInterval(fetchSpecialData, 1000);
                 return () => clearInterval(interval);
-            }, [fetchFromApi]); 
+            }, [fetchSpecialData]);
 
             // Auto Load on Mount
             useEffect(() => {
@@ -326,7 +326,7 @@
             // Stats 1: Historical Cycle Rate (Baseline)
             const historicalStats = useMemo(() => {
                 if (posts.length === 0) return {};
-                const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; // hours for 1h, 6h, 12h, 1d...7d
+                const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; 
                 const res = {};
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
                 
@@ -364,21 +364,22 @@
                     }).length;
                 };
 
-                // Map keys: 1h, 6h, 12h, 1d, 2d, 3d, 4d, 5d, 6d, 7d
                 const windowKeys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
                 const data = {};
 
                 windowKeys.forEach(h => {
                     const current = getCountInWindow(now, h);
                     const history = [];
-                    // Look back 1 to 7 days (not weeks, as per typical tactical analysis, but user asked for "History Back" 1-7 days ago comparison?)
-                    // User said: "History back 24H -> 1 Day, add 2-7 days". Usually this means comparing "Current 1D count" vs "1D count 1 day ago".
-                    // Let's assume comparisons are: 
-                    // Current Window (e.g. 1H) vs Same Window 1 day ago, 2 days ago... 7 days ago.
                     for(let d=1; d<=7; d++) {
                         history.push(getCountInWindow(new Date(now.getTime() - d * 24 * 3600 * 1000), h));
                     }
-                    data[h] = { current, history };
+                    
+                    // Calculate 7-Day Average
+                    const sum7d = history.reduce((acc, curr) => acc + curr, 0);
+                    const avg7d = sum7d / history.length;
+                    const ratio7d = avg7d > 0 ? (current / avg7d) * 100 : (current > 0 ? 100 : 0);
+
+                    data[h] = { current, history, avg7d: avg7d.toFixed(1), ratio7d: ratio7d.toFixed(0) };
                 });
 
                 return data;
@@ -388,7 +389,6 @@
             const velocityStats = useMemo(() => {
                 if (!historicalStats[1] || !realTimeComparison) return {};
                 const res = {};
-                // Keys for 1h, 6h, 12h, 1d...7d
                 const keys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
                 
                 keys.forEach(h => {
@@ -396,22 +396,24 @@
                     const stats = historicalStats[h];
                     const avg = stats.avg;
                     
-                    // Calculate position percentage for gauge (0% = min, 50% = avg, 100% = max)
-                    // We map min->0, max->100.
+                    // Calculate position percentage for gauge
                     let pos = 0;
                     if (stats.max > stats.min) {
                         pos = ((current - stats.min) / (stats.max - stats.min)) * 100;
                     } else if (current > 0) {
-                        pos = 100; // If min==max and >0
+                        pos = 100; 
                     }
-                    pos = Math.max(0, Math.min(100, pos)); // Clamp
+                    pos = Math.max(0, Math.min(100, pos));
+                    
+                    const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
 
                     res[h] = { 
                         current, 
                         avg: avg.toFixed(1), 
                         min: stats.min, 
                         max: stats.max, 
-                        pos 
+                        pos,
+                        ratio: ratio.toFixed(0)
                     };
                 });
                 return res;
@@ -446,35 +448,31 @@
             // --- UI Components ---
             const RateRow = ({ label, data }) => {
                 if (!data) return null;
+                const ratioNum = parseInt(data.ratio);
+                const isHigh = ratioNum >= 100;
                 
-                // Color based on position: <20% blue (low), 20-80% green (normal), >80% red (high)
-                let barColor = "bg-emerald-500";
-                if (data.pos > 80) barColor = "bg-red-500";
-                else if (data.pos < 20) barColor = "bg-sky-500";
-
                 return (
                     <div className="py-3 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm text-gray-400 font-bold w-12">{label}</span>
+                            <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
                         </div>
                         
                         <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
                             <span>Min: {data.min}</span>
-                            <span className="text-gray-400">Avg: {data.avg}</span>
+                            {/* Avg Display with Percentage Above */}
+                            <div className="flex flex-col items-center">
+                                <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
+                                    {isHigh ? '>' : '<'} {data.ratio}%
+                                </span>
+                                <span className="text-gray-400">Avg: {data.avg}</span>
+                            </div>
                             <span>Max: {data.max}</span>
                         </div>
 
-                        {/* Gauge / Slider Bar */}
+                        {/* Gauge / Slider Bar with Gradient */}
                         <div className="gauge-track w-full mt-1">
-                            {/* Gradient Background is set in CSS class */}
-                            <div 
-                                className="gauge-thumb shadow-lg" 
-                                style={{
-                                    left: `${data.pos}%`,
-                                    backgroundColor: data.pos > 80 ? '#ef4444' : (data.pos < 20 ? '#0ea5e9' : '#10b981')
-                                }}
-                            ></div>
+                            <div className="gauge-fill" style={{width: `${data.pos}%`}}></div>
                         </div>
                     </div>
                 );
@@ -482,11 +480,24 @@
 
             const HistoryCompareRow = ({ label, data }) => {
                 if (!data) return null;
+                const ratioNum = parseInt(data.ratio7d);
+                const isHigh = ratioNum >= 100;
+
                 return (
                     <div className="py-2 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
                             <span className="text-sm text-sky-400 font-bold w-10">{label}</span>
-                            <span className="text-sm text-white font-mono bg-gray-800 px-1.5 rounded">{data.current}</span>
+                            
+                            <div className="flex items-center space-x-3">
+                                <span className="text-base text-white font-mono bg-gray-800 px-1.5 rounded">{data.current}</span>
+                                {/* 7D Avg Comparison */}
+                                <div className="flex flex-col items-end leading-none">
+                                     <span className="text-[9px] text-gray-500">7D Avg: {data.avg7d}</span>
+                                     <span className={`text-[9px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
+                                        {isHigh ? '>' : '<'} {data.ratio7d}%
+                                     </span>
+                                </div>
+                            </div>
                         </div>
                         <div className="flex space-x-2 text-center pb-1">
                             {data.history.map((val, idx) => (
@@ -599,7 +610,13 @@
                                     
                                     {/* Right: Latest Post Count */}
                                     <div className="pl-2">
-                                        <div className="text-gray-400 text-[10px] uppercase tracking-widest mb-1">最新發文數 (Latest)</div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <div className="text-gray-400 text-[10px] uppercase tracking-widest">最新發文數 (Latest)</div>
+                                            {/* Manual Refresh Button */}
+                                            <button onClick={fetchSpecialData} className="text-gray-500 hover:text-white transition p-1 rounded-full bg-gray-800/50">
+                                                <RefreshCw className={`w-3 h-3 ${loadingSpecial ? 'animate-spin' : ''}`} />
+                                            </button>
+                                        </div>
                                         <div className={`text-4xl font-bold font-mono my-1 text-white ${isNewPost ? 'animate-flash' : ''}`}>
                                             {specialCount !== null ? specialCount : "--"}
                                             <span className="text-sm text-gray-500 ml-1">篇</span>
