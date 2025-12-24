@@ -75,6 +75,17 @@
             /* Gradient for health bar effect */
             background: linear-gradient(90deg, #10b981 0%, #facc15 50%, #ef4444 100%);
         }
+        /* Custom Scrollbar for Recent Posts */
+        .custom-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #111; 
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #333; 
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -113,6 +124,9 @@
         const Zap = (props) => <IconBase {...props} path={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />} />;
         const History = (props) => <IconBase {...props} path={<g><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></g>} />;
         const Trending = (props) => <IconBase {...props} path={<polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />} />;
+        const Calculator = (props) => <IconBase {...props} path={<g><rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="16" y1="14" x2="16" y2="18" /><path d="M16 10h.01" /><path d="M12 10h.01" /><path d="M8 10h.01" /><path d="M12 14h.01" /><path d="M8 14h.01" /><path d="M12 18h.01" /><path d="M8 18h.01" /></g>} />;
+        const MessageSquare = (props) => <IconBase {...props} path={<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />} />;
+        const Target = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></g>} />;
 
         const App = () => {
             // --- State ---
@@ -133,34 +147,194 @@
             const [loadingSpecial, setLoadingSpecial] = useState(false); // 獨立按鈕的 Loading 狀態
             const prevSpecialCountRef = useRef(null);
 
+            // 預測計算狀態
+            const [predictInput, setPredictInput] = useState(''); // Use string input to allow special formats
+            const [parsedHours, setParsedHours] = useState(null);
+            const [prediction, setPrediction] = useState(null);
+            
+            // 目標倒數相關
+            // User requirement: 12/26 中午 12:00 (ET)
+            // Year: The user mentioned 12/26, assuming current year/next occurrence.
+            // If current month is Dec and day < 26, use this year. Else next year.
+            const targetDate = useMemo(() => {
+                const now = new Date(); // Local
+                // We need 12/26 12:00 PM EST. 
+                // Creating a specific date object. 
+                // Since user operates in EST context mostly, let's target 2025-12-26 12:00:00 EST as per CSV sample or current year.
+                // Assuming nearest future 12/26.
+                let year = now.getFullYear();
+                if (now.getMonth() === 11 && now.getDate() > 26) year++; 
+                
+                // Construct Date string for EST parsing
+                // Note: Browser support for time zone in date string varies, best to use specific construction or offset
+                // EST is UTC-5 (Standard) or UTC-4 (Daylight). Dec is Standard (UTC-5).
+                // 12:00 PM EST = 17:00 UTC
+                const target = new Date(Date.UTC(year, 11, 26, 17, 0, 0)); 
+                return target;
+            }, []);
+
+            const [hoursToTarget, setHoursToTarget] = useState(0);
+
             // --- Time Setup ---
             useEffect(() => {
-                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                const timer = setInterval(() => {
+                    const now = new Date();
+                    setCurrentTime(now);
+                    
+                    // Calculate hours to target
+                    const diffMs = targetDate - now;
+                    const hours = Math.max(0, diffMs / (1000 * 60 * 60));
+                    setHoursToTarget(hours);
+                    
+                }, 1000);
                 return () => clearInterval(timer);
-            }, []);
+            }, [targetDate]);
+
+            // --- Auto-fill prediction input with hours to target on load ---
+            useEffect(() => {
+                if (hoursToTarget > 0 && !predictInput) {
+                    setPredictInput(hoursToTarget.toFixed(2));
+                }
+            }, [hoursToTarget]);
+
+            // --- Input Parsing Logic ---
+            useEffect(() => {
+                if (!predictInput) {
+                    setParsedHours(null);
+                    return;
+                }
+
+                let hours = 0;
+                const inputStr = predictInput.toString().trim();
+
+                // Format: 0115 or 01:15 (Days:Hours)
+                // Heuristic: If contains ':', split. If length >= 3 and no dot/colon, treat as DDHH or DHH
+                if (inputStr.includes(':')) {
+                    const parts = inputStr.split(':');
+                    const d = parseInt(parts[0]) || 0;
+                    const h = parseInt(parts[1]) || 0;
+                    if (h < 24) hours = (d * 24) + h;
+                } else if (!inputStr.includes('.') && inputStr.length >= 3 && inputStr.length <= 4) {
+                    // Try parsing as DDHH
+                    // 0115 -> 01 days 15 hours
+                    const d = parseInt(inputStr.slice(0, -2));
+                    const h = parseInt(inputStr.slice(-2));
+                    
+                    // Validation: Hour part must be < 24
+                    if (h < 24) {
+                        hours = (d * 24) + h;
+                    } else {
+                        // Fallback or invalid, maybe just raw hours? 
+                        // User said "0124 is unreasonable".
+                        hours = parseFloat(inputStr); // treat as raw hours if pattern fails logic
+                    }
+                } else {
+                    // Standard number
+                    hours = parseFloat(inputStr);
+                }
+
+                if (!isNaN(hours) && hours > 0) {
+                    setParsedHours(hours);
+                } else {
+                    setParsedHours(null);
+                }
+
+            }, [predictInput]);
+
+
+            // --- Prediction Logic with Time-Weighted Scoring & Percentiles ---
+            useEffect(() => {
+                if (!posts.length || parsedHours === null) {
+                    setPrediction(null);
+                    return;
+                }
+
+                const windowMs = parsedHours * 3600 * 1000;
+                
+                const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
+                
+                if (timestamps.length < 10) return; 
+
+                const startTime = timestamps[0];
+                const endTime = timestamps[timestamps.length - 1];
+                const totalDuration = endTime - startTime;
+                
+                if (totalDuration < windowMs) return;
+
+                let counts = [];
+                // Sliding window every 1 hour
+                for (let t = startTime; t <= endTime - windowMs; t += 3600000) {
+                    const rangeEnd = t + windowMs;
+                    const count = timestamps.filter(ts => ts >= t && ts < rangeEnd).length;
+                    counts.push({ count, time: t });
+                }
+
+                if (counts.length > 0) {
+                    const splitIndex = Math.floor(counts.length * (2/3)); 
+                    const pastData = counts.slice(0, splitIndex); 
+                    const recentData = counts.slice(splitIndex);  
+
+                    const calcAvg = (arr) => arr.length ? arr.reduce((a,b)=>a+b.count,0) / arr.length : 0;
+                    const pastAvg = calcAvg(pastData);
+                    const recentAvg = calcAvg(recentData);
+                    
+                    let weightedAvg = 0;
+                    if (recentData.length > 0 && pastData.length > 0) {
+                        weightedAvg = (recentAvg * 0.7) + (pastAvg * 0.3);
+                    } else {
+                        weightedAvg = calcAvg(counts);
+                    }
+
+                    const allCounts = counts.map(c => c.count).sort((a, b) => a - b);
+                    const getPercentile = (p) => allCounts[Math.floor((allCounts.length - 1) * p)];
+                    
+                    const min = allCounts[0];
+                    const p25 = getPercentile(0.25);
+                    const p50 = getPercentile(0.50);
+                    const p75 = getPercentile(0.75);
+                    const max = allCounts[allCounts.length - 1]; 
+
+                    // Probability Calculation
+                    const calculateProbability = (targetVal) => {
+                        const tolerance = Math.max(1, Math.round(targetVal * 0.1)); 
+                        const matchingWindows = counts.filter(c => Math.abs(c.count - targetVal) <= tolerance).length;
+                        return ((matchingWindows / counts.length) * 100).toFixed(0);
+                    };
+
+                    const avgProb = Math.min(100, Math.max(30, 100 - Math.abs(weightedAvg - recentAvg)*5)).toFixed(0);
+
+                    setPrediction({ 
+                        min, 
+                        p25,
+                        p50,
+                        p75,
+                        max, 
+                        avg: weightedAvg.toFixed(1), 
+                        hours: parsedHours.toFixed(1),
+                        avgProb
+                    });
+                } else {
+                    setPrediction(null);
+                }
+
+            }, [posts, parsedHours]);
 
             // --- API Fetching (Main System) ---
             const fetchFromApi = useCallback(async () => {
                 setLoading(true);
-                // Prefer CORS Proxy IO as it usually works without explicit auth
                 const corsURL = 'https://corsproxy.io/?'; 
-                
                 try {
-                    // 2. Get Posts (90 days)
                     const endDate = new Date();
                     const startDate = new Date();
                     startDate.setDate(startDate.getDate() - 90); 
 
-                    // 加隨機數避免快取
                     const postsTarget = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
                     const postsUrl = `${corsURL}${encodeURIComponent(postsTarget)}&_t=${Date.now()}`;
                     
                     const postsRes = await fetch(postsUrl);
 
                     if (!postsRes.ok) {
-                         if (postsRes.status === 403) {
-                             setShowControls(true); 
-                         }
+                         if (postsRes.status === 403) setShowControls(true); 
                          throw new Error(`連線錯誤 HTTP ${postsRes.status}`);
                     }
 
@@ -170,10 +344,8 @@
                     if (Array.isArray(postsData) && postsData.length > 0) {
                         processData(postsData);
                         setDataSource("Live API (90 Days)");
-                        setShowControls(false); // Hide controls on success
+                        setShowControls(false); 
                         setErrorMsg(null);
-                        
-                        // Try get User Info silently
                         try {
                             const userTarget = "https://xtracker.polymarket.com/api/users/elonmusk";
                             const userRes = await fetch(`${corsURL}${encodeURIComponent(userTarget)}`);
@@ -182,21 +354,17 @@
                                 if (uData.success) setUserInfo(uData.data);
                             }
                         } catch(e) {}
-
-                    } else {
-                        // console.warn("Main API returned empty data");
                     }
-
                 } catch (err) {
                     console.error("Main fetch failed:", err);
                     setErrorMsg(`${err.message}`);
-                    setShowControls(true); // Show controls on error
+                    setShowControls(true); 
                 } finally {
                     setLoading(false);
                 }
             }, []);
 
-            // --- 獨立的特殊計數 Fetch (可手動觸發) ---
+            // --- 獨立的特殊計數 Fetch ---
             const fetchSpecialData = useCallback(async () => {
                 setLoadingSpecial(true);
                 const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
@@ -204,11 +372,7 @@
                 
                 try {
                     const response = await fetch(proxyUrl, {
-                        "headers": {
-                            "accept": "application/json",
-                            "cache-control": "no-cache",
-                            "pragma": "no-cache"
-                        },
+                        "headers": { "accept": "application/json", "cache-control": "no-cache", "pragma": "no-cache" },
                         "method": "GET"
                     });
 
@@ -216,36 +380,28 @@
                         const json = await response.json();
                         if (json.success && Array.isArray(json.data)) {
                             const newCount = json.data.length;
-                            
                             if (prevSpecialCountRef.current !== null && newCount !== prevSpecialCountRef.current) {
                                 setIsNewPost(true);
                                 setTimeout(() => setIsNewPost(false), 2000); 
-                                fetchFromApi(); // Trigger main update
+                                fetchFromApi(); 
                             }
                             prevSpecialCountRef.current = newCount;
                             setSpecialCount(newCount);
                             setSpecialLastFetchTime(new Date());
-                        } else {
-                            setSpecialCount(0);
-                        }
-                    } else {
-                        setSpecialCount("N/A");
-                    }
-                } catch (error) {
-                    setSpecialCount("N/A");
-                } finally {
-                    setLoadingSpecial(false);
-                }
+                        } else { setSpecialCount(0); }
+                    } else { setSpecialCount("N/A"); }
+                } catch (error) { setSpecialCount("N/A"); } 
+                finally { setLoadingSpecial(false); }
             }, [fetchFromApi]);
 
-            // Setup Interval for Special Fetch
+            // Intervals
             useEffect(() => {
                 fetchSpecialData();
                 const interval = setInterval(fetchSpecialData, 1000);
                 return () => clearInterval(interval);
             }, [fetchSpecialData]);
 
-            // Auto Load on Mount
+            // Auto Load
             useEffect(() => {
                 fetchFromApi();
             }, [fetchFromApi]);
@@ -305,31 +461,43 @@
                             setDataSource(`CSV: ${file.name}`);
                             setShowControls(false);
                             setErrorMsg(null);
-                        } else { setErrorMsg("解析失敗：找不到有效數據"); }
-                    } catch (err) { setErrorMsg("檔案讀取錯誤"); }
+                        } else { setErrorMsg("解析失敗"); }
+                    } catch (err) { setErrorMsg("檔案錯誤"); }
                 };
                 reader.readAsText(file);
             };
 
-            // --- Logic & Analysis ---
-            const etTimeStr = currentTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
-            
+            const simpleTranslate = (text) => {
+                if (!text) return "";
+                let t = text;
+                t = t.replace(/RT /g, "【轉推】");
+                t = t.replace(/Space/gi, "太空");
+                t = t.replace(/Mars/gi, "火星");
+                t = t.replace(/crypto/gi, "加密貨幣");
+                t = t.replace(/doge/gi, "狗狗幣");
+                t = t.replace(/AI/g, "人工智慧");
+                t = t.replace(/future/gi, "未來");
+                return t;
+            };
+
+            // --- UI Formatters ---
+            const formatTime = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
+            const formatDay = (date) => ['週日','週一','週二','週三','週四','週五','週六'][date.getDay()];
+
+            // --- Stats Logic ---
+            let hoursSinceLast = 0;
             const lastPost = posts.length > 0 ? posts[0] : null;
             const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
-            
-            let hoursSinceLast = 0;
             if (lastPostTime) {
                 const diffMs = new Date() - lastPostTime;
                 hoursSinceLast = diffMs / (1000 * 60 * 60);
             }
 
-            // Stats 1: Historical Cycle Rate (Baseline)
             const historicalStats = useMemo(() => {
                 if (posts.length === 0) return {};
                 const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; 
                 const res = {};
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
-                
                 windows.forEach(win => {
                     const winMs = win * 60 * 60 * 1000;
                     let max = 0, min = Infinity, sum = 0, samples = 0;
@@ -342,135 +510,67 @@
                         sum += count;
                         samples++;
                     }
-                    res[win] = { 
-                        avg: samples > 0 ? sum / samples : 0, 
-                        max, 
-                        min: min === Infinity ? 0 : min 
-                    };
+                    res[win] = { avg: samples > 0 ? sum / samples : 0, max, min: min === Infinity ? 0 : min };
                 });
                 return res;
             }, [posts]);
 
-            // Stats 2: Real-time vs History Comparison (Expanded to 7 days)
             const realTimeComparison = useMemo(() => {
                 if (posts.length === 0) return null;
                 const now = new Date();
-                
-                const getCountInWindow = (refTime, hours) => {
-                    const start = new Date(refTime.getTime() - hours * 60 * 60 * 1000);
-                    return posts.filter(p => {
-                        const pt = new Date(p.createdAt);
-                        return pt >= start && pt <= refTime;
-                    }).length;
+                const getCount = (ref, h) => {
+                    const start = new Date(ref.getTime() - h * 3600000);
+                    return posts.filter(p => new Date(p.createdAt) >= start && new Date(p.createdAt) <= ref).length;
                 };
-
-                const windowKeys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
                 const data = {};
-
-                windowKeys.forEach(h => {
-                    const current = getCountInWindow(now, h);
+                [1, 6, 12, 24, 48, 72, 96, 120, 144, 168].forEach(h => {
+                    const current = getCount(now, h);
                     const history = [];
-                    for(let d=1; d<=7; d++) {
-                        history.push(getCountInWindow(new Date(now.getTime() - d * 24 * 3600 * 1000), h));
-                    }
-                    
-                    // Calculate 7-Day Average
-                    const sum7d = history.reduce((acc, curr) => acc + curr, 0);
-                    const avg7d = sum7d / history.length;
-                    const ratio7d = avg7d > 0 ? (current / avg7d) * 100 : (current > 0 ? 100 : 0);
-
+                    for(let d=1; d<=7; d++) history.push(getCount(new Date(now.getTime() - d*86400000), h));
+                    const sum7d = history.reduce((a,c)=>a+c,0);
+                    const avg7d = sum7d/7;
+                    const ratio7d = avg7d>0 ? (current/avg7d)*100 : (current>0?100:0);
                     data[h] = { current, history, avg7d: avg7d.toFixed(1), ratio7d: ratio7d.toFixed(0) };
                 });
-
                 return data;
             }, [posts, currentTime]);
 
-            // Stats 3: Velocity & Ratio (Current vs Historical Avg) with Gauge Logic
             const velocityStats = useMemo(() => {
                 if (!historicalStats[1] || !realTimeComparison) return {};
                 const res = {};
-                const keys = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168];
-                
-                keys.forEach(h => {
+                [1, 6, 12, 24, 48, 72, 96, 120, 144, 168].forEach(h => {
                     const current = realTimeComparison[h].current;
                     const stats = historicalStats[h];
                     const avg = stats.avg;
-                    
-                    // Calculate position percentage for gauge
                     let pos = 0;
-                    if (stats.max > stats.min) {
-                        pos = ((current - stats.min) / (stats.max - stats.min)) * 100;
-                    } else if (current > 0) {
-                        pos = 100; 
-                    }
+                    if (stats.max > stats.min) pos = ((current - stats.min) / (stats.max - stats.min)) * 100;
+                    else if (current > 0) pos = 100;
                     pos = Math.max(0, Math.min(100, pos));
-                    
                     const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
-
-                    res[h] = { 
-                        current, 
-                        avg: avg.toFixed(1), 
-                        min: stats.min, 
-                        max: stats.max, 
-                        pos,
-                        ratio: ratio.toFixed(0)
-                    };
+                    res[h] = { current, avg: avg.toFixed(1), min: stats.min, max: stats.max, pos, ratio: ratio.toFixed(0) };
                 });
                 return res;
             }, [historicalStats, realTimeComparison]);
-
-            // Probability Logic
-            const tacticalData = useMemo(() => {
-                if (posts.length < 2) return null; 
-                const sorted = [...posts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                const currentS = hoursSinceLast;
-                const calcP = (h) => {
-                    const gaps = [];
-                    for (let i = 0; i < sorted.length - 1; i++) {
-                        const diff = (new Date(sorted[i].createdAt) - new Date(sorted[i+1].createdAt)) / 3600000;
-                        if (diff > 0) gaps.push(diff);
-                    }
-                    const denom = gaps.filter(g => g >= currentS).length;
-                    if (denom === 0) return 0;
-                    const num = gaps.filter(g => g >= currentS && g <= currentS + h).length;
-                    return (num / denom) * 100;
-                };
-                
-                let status = "正常活動";
-                let statusColor = "text-emerald-400";
-                let advice = "監控中，無異常。";
-                if (currentS < 0.5) { status = "🔥 剛剛發文"; statusColor = "text-red-500 font-bold glow-text"; advice = "目標剛發文。密切注意是否開啟連續發文模式。"; }
-                else if (currentS > 6 && currentS < 9) { status = "🛌 可能睡眠中"; statusColor = "text-yellow-400"; advice = "靜默 > 6 小時。根據歷史作息，醒來後常伴隨高頻發文。"; }
-                
-                return { probs: [calcP(1), calcP(2), calcP(3), calcP(4)], status, statusColor, advice };
-            }, [posts, hoursSinceLast]);
 
             // --- UI Components ---
             const RateRow = ({ label, data }) => {
                 if (!data) return null;
                 const ratioNum = parseInt(data.ratio);
                 const isHigh = ratioNum >= 100;
-                
                 return (
                     <div className="py-3 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
                         </div>
-                        
                         <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
                             <span>Min: {data.min}</span>
-                            {/* Avg Display with Percentage Above */}
                             <div className="flex flex-col items-center">
-                                <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
-                                    {isHigh ? '>' : '<'} {data.ratio}%
-                                </span>
+                                <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio}%</span>
                                 <span className="text-gray-400">Avg: {data.avg}</span>
                             </div>
                             <span>Max: {data.max}</span>
                         </div>
-
-                        {/* Gauge / Slider Bar with Gradient */}
                         <div className="gauge-track w-full mt-1">
                             <div className="gauge-fill" style={{width: `${data.pos}%`}}></div>
                         </div>
@@ -482,20 +582,15 @@
                 if (!data) return null;
                 const ratioNum = parseInt(data.ratio7d);
                 const isHigh = ratioNum >= 100;
-
                 return (
                     <div className="py-2 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
                             <span className="text-sm text-sky-400 font-bold w-10">{label}</span>
-                            
                             <div className="flex items-center space-x-3">
                                 <span className="text-base text-white font-mono bg-gray-800 px-1.5 rounded">{data.current}</span>
-                                {/* 7D Avg Comparison */}
                                 <div className="flex flex-col items-end leading-none">
                                      <span className="text-[9px] text-gray-500">7D Avg: {data.avg7d}</span>
-                                     <span className={`text-[9px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
-                                        {isHigh ? '>' : '<'} {data.ratio7d}%
-                                     </span>
+                                     <span className={`text-[9px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio7d}%</span>
                                 </div>
                             </div>
                         </div>
@@ -503,9 +598,7 @@
                             {data.history.map((val, idx) => (
                                 <div key={idx} className="flex-shrink-0 flex flex-col items-center bg-gray-900/50 rounded py-1 w-12">
                                     <span className="text-[9px] text-gray-500">-{idx+1}天</span>
-                                    <span className={`text-xs font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>
-                                        {val}
-                                    </span>
+                                    <span className={`text-xs font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>{val}</span>
                                 </div>
                             ))}
                         </div>
@@ -516,9 +609,7 @@
             const ProbBar = ({ hour, percent }) => (
                 <div className="flex-1 bg-gray-900 rounded p-2 text-center border border-gray-800 mx-1 first:ml-0 last:mr-0">
                     <div className="text-xs text-gray-400 mb-1">{hour}H 內</div>
-                    <div className={`text-lg font-bold ${percent > 50 ? 'text-emerald-400' : 'text-gray-300'}`}>
-                        {percent.toFixed(0)}%
-                    </div>
+                    <div className={`text-lg font-bold ${percent > 50 ? 'text-emerald-400' : 'text-gray-300'}`}>{percent.toFixed(0)}%</div>
                     <div className="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
                         <div className="bg-emerald-500 h-full transition-all duration-500" style={{width: `${percent}%`}}></div>
                     </div>
@@ -527,35 +618,31 @@
 
             return (
                 <div className="min-h-screen pb-safe-area-bottom">
-                    {/* 1. Top Sticky Header */}
+                    {/* Header */}
                     <div className="sticky top-0 z-50 bg-black/90 backdrop-blur border-b border-gray-800 px-4 py-3 flex justify-between items-center shadow-lg">
                         <div className="flex items-center space-x-2">
-                            {userInfo ? (
-                                <img src={userInfo.avatarUrl} alt="User" className="w-8 h-8 rounded-full border border-gray-600" />
-                            ) : (
-                                <Terminal className="w-6 h-6 text-sky-500" />
-                            )}
+                            {userInfo ? <img src={userInfo.avatarUrl} alt="User" className="w-8 h-8 rounded-full border border-gray-600" /> : <Terminal className="w-6 h-6 text-sky-500" />}
                             <div>
                                 <div className="font-bold tracking-tight text-gray-100 leading-none flex items-center">
-                                    ELON TACTICAL
-                                    {userInfo?.verified && <CheckCircle className="w-3 h-3 text-blue-400 ml-1" />}
+                                    ELON TACTICAL {userInfo?.verified && <CheckCircle className="w-3 h-3 text-blue-400 ml-1" />}
                                 </div>
-                                <div className={`text-[10px] font-mono tracking-wider ${dataSource.includes("Live") ? "text-emerald-500" : "text-sky-500"}`}>
-                                    ● {dataSource.toUpperCase()}
-                                </div>
+                                <div className={`text-[10px] font-mono tracking-wider ${dataSource.includes("Live") ? "text-emerald-500" : "text-sky-500"}`}>● {dataSource.toUpperCase()}</div>
                             </div>
                         </div>
                         <div className="flex flex-col items-end">
-                            <div className="text-2xl font-mono font-bold text-emerald-400 leading-none">
-                                {etTimeStr}<span className="text-xs text-emerald-600 ml-1">ET</span>
+                            <div className="flex items-baseline space-x-1">
+                                <span className="text-2xl font-mono font-bold text-emerald-400 leading-none">{formatTime(currentTime)}</span>
+                                <span className="text-xs text-emerald-600 font-bold">ET</span>
+                                <span className="text-xs text-gray-400">({formatDay(currentTime)})</span>
                             </div>
-                            <div className="text-[10px] text-gray-500 mt-1">
-                                Local: {currentTime.getHours().toString().padStart(2,'0')}:{currentTime.getMinutes().toString().padStart(2,'0')}
+                            <div className="flex items-center text-[10px] text-sky-400 mt-1 bg-sky-900/20 px-1 rounded">
+                                <Target className="w-3 h-3 mr-1" />
+                                倒數: {hoursToTarget > 0 ? `${Math.floor(hoursToTarget)}h ${Math.floor((hoursToTarget % 1) * 60)}m` : '已過期'}
                             </div>
                         </div>
                     </div>
 
-                    {/* 2. Controls (Hidden by default, shown on error) */}
+                    {/* Controls */}
                     <div className="bg-[#0a0a0a] border-b border-gray-900">
                         {showControls ? (
                             <div className="px-4 py-2 animate-in slide-in-from-top-2 space-y-2">
@@ -583,15 +670,11 @@
 
                     {posts.length > 0 ? (
                         <div className="p-4 space-y-4">
-                            
-                            {/* 3. Hero Status Card (SPLIT LAYOUT) */}
+                            {/* Main Stats Card */}
                             <div className="mobile-card p-5 relative overflow-hidden">
-                                <div className="absolute top-0 right-0 p-4 opacity-10">
-                                    <Clock className="w-24 h-24 text-white" />
-                                </div>
-                                
+                                <div className="absolute top-0 right-0 p-4 opacity-10"><Clock className="w-24 h-24 text-white" /></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    {/* Left: Silence Time */}
+                                    {/* Silence */}
                                     <div className="stat-divider pr-4">
                                         <div className="flex justify-between items-center mb-1">
                                             <div className="text-gray-400 text-[10px] uppercase tracking-widest">目前靜默 (Silence)</div>
@@ -599,20 +682,15 @@
                                         <div className={`text-4xl font-bold font-mono my-1 ${hoursSinceLast > 6 ? 'text-red-400' : 'text-white'}`}>
                                             {hoursSinceLast.toFixed(2)}<span className="text-sm text-gray-500 ml-1">hr</span>
                                         </div>
-                                        {/* New: Last Post Time */}
                                         <div className="text-[10px] text-gray-400 flex items-center">
                                             <span className="mr-1">Latest:</span>
-                                            <span className="font-mono text-sky-400">
-                                                {lastPostTime ? lastPostTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: false}) : '--'}
-                                            </span>
+                                            <span className="font-mono text-sky-400">{lastPostTime ? lastPostTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: false}) : '--'}</span>
                                         </div>
                                     </div>
-                                    
-                                    {/* Right: Latest Post Count */}
+                                    {/* Latest Count */}
                                     <div className="pl-2">
                                         <div className="flex justify-between items-center mb-1">
                                             <div className="text-gray-400 text-[10px] uppercase tracking-widest">最新發文數 (Latest)</div>
-                                            {/* Manual Refresh Button */}
                                             <button onClick={fetchSpecialData} className="text-gray-500 hover:text-white transition p-1 rounded-full bg-gray-800/50">
                                                 <RefreshCw className={`w-3 h-3 ${loadingSpecial ? 'animate-spin' : ''}`} />
                                             </button>
@@ -621,40 +699,75 @@
                                             {specialCount !== null ? specialCount : "--"}
                                             <span className="text-sm text-gray-500 ml-1">篇</span>
                                         </div>
-                                        {/* New: Download Time */}
                                         <div className="flex items-center text-[10px] text-gray-500 mt-1">
                                             <Zap className={`w-3 h-3 mr-1 ${isNewPost ? 'animate-bounce text-sky-400' : ''}`} />
-                                            <span>
-                                                {specialLastFetchTime ? `更新於 ${specialLastFetchTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false})}` : '等待數據...'}
-                                            </span>
+                                            <span>{specialLastFetchTime ? `更新於 ${specialLastFetchTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false})}` : '等待...'}</span>
+                                        </div>
+                                        {/* Prediction Input */}
+                                        <div className="mt-3 pt-2 border-t border-gray-800/50 flex flex-col">
+                                            <div className="flex items-center mb-1">
+                                                <Calculator className="w-3 h-3 text-sky-500 mr-2" />
+                                                <span className="text-[10px] text-gray-400">預測時數 (智慧格式):</span>
+                                            </div>
+                                            <input type="text" placeholder="例: 1.5 或 0115 (1天15時)" className="bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 w-full focus:outline-none focus:border-sky-500" value={predictInput} onChange={(e) => setPredictInput(e.target.value)} />
+                                            {parsedHours && <div className="text-[9px] text-emerald-500 mt-0.5 text-right">解析: {parsedHours.toFixed(1)} 小時</div>}
                                         </div>
                                     </div>
                                 </div>
-
                                 <div className="mt-4 pt-3 border-t border-gray-800 text-sm text-gray-400 leading-relaxed">
                                     <span className="text-sky-500 font-bold">戰術提示：</span>
-                                    {tacticalData?.advice}
+                                    {prediction ? (
+                                        <span className="text-white animate-in fade-in block">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-sky-400 font-bold text-sm">未來 {prediction.hours} 小時加權預測:</span>
+                                                <span className="text-[10px] text-gray-500 bg-gray-900 px-2 py-0.5 rounded-full border border-gray-800">近期權重 70%</span>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                                                    <div className="bg-gray-800/50 rounded p-2 border border-gray-700 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-gray-400">Min (0%)</div>
+                                                        <div className="text-emerald-400 font-mono font-bold text-lg">{prediction.min}</div>
+                                                    </div>
+                                                    <div className="bg-gray-800/50 rounded p-2 border border-gray-700 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-gray-400">25%</div>
+                                                        <div className="text-white font-mono font-bold text-lg">{prediction.p25}</div>
+                                                    </div>
+                                                    <div className="bg-gray-800/50 rounded p-2 border border-gray-700 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-gray-400">50%</div>
+                                                        <div className="text-white font-mono font-bold text-lg">{prediction.p50}</div>
+                                                    </div>
+                                                    <div className="bg-gray-800/50 rounded p-2 border border-gray-700 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-gray-400">75%</div>
+                                                        <div className="text-white font-mono font-bold text-lg">{prediction.p75}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                                                    <div className="bg-gray-800/50 rounded p-2 border border-gray-700 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-gray-400">Max (100%)</div>
+                                                        <div className="text-red-400 font-mono font-bold text-xl">{prediction.max}</div>
+                                                    </div>
+                                                    <div className="bg-sky-900/20 rounded p-2 border border-sky-800 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-sky-400 font-bold">W.AVG</div>
+                                                        <div className="text-white font-mono font-bold text-xl">{prediction.avg}</div>
+                                                    </div>
+                                                    <div className="bg-emerald-900/20 rounded p-2 border border-emerald-800 flex flex-col items-center justify-center">
+                                                        <div className="text-[9px] text-emerald-400 uppercase">Conf</div>
+                                                        <div className="text-xl font-bold text-emerald-400 font-mono">{prediction.avgProb}%</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </span>
+                                    ) : (
+                                        "輸入時數以開始預測..."
+                                    )}
                                 </div>
                             </div>
 
-                            {/* 4. Probability Section */}
-                            <div>
-                                <h3 className="text-xs text-gray-500 uppercase mb-2 ml-1">發文機率預測 (AI Prediction)</h3>
-                                <div className="flex justify-between">
-                                    {tacticalData && tacticalData.probs.map((p, i) => (
-                                        <ProbBar key={i} hour={i+1} percent={p} />
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* 5. SPLIT VIEW: Velocity & Ratio vs Deep History Comparison */}
+                            {/* Split View */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* Left Column: Velocity & Ratio (Current vs Avg/Min/Max) */}
+                                {/* Velocity */}
                                 <div className="mobile-card px-4 py-2">
-                                    <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center">
-                                        <Trending className="w-3 h-3 mr-1" />
-                                        速率強度 (Range Position)
-                                    </h3>
+                                    <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center"><Trending className="w-3 h-3 mr-1" /> 速率強度 (Range)</h3>
                                     {velocityStats[1] && (
                                         <>
                                             <RateRow label="1H" data={velocityStats[1]} />
@@ -670,8 +783,7 @@
                                         </>
                                     )}
                                 </div>
-
-                                {/* Right Column: Deep History Comparison (1-7 Days) */}
+                                {/* History */}
                                 <div className="mobile-card px-4 py-2 overflow-x-auto hide-scroll">
                                     <div className="min-w-[320px]">
                                         <h3 className="text-sm text-sky-500 uppercase mt-2 mb-1 flex items-center justify-between">
@@ -696,27 +808,23 @@
                                 </div>
                             </div>
 
-                            {/* 6. Last Post */}
+                            {/* Last 10 Posts */}
                             <div className="mobile-card p-4">
-                                <h3 className="text-xs text-gray-500 uppercase mb-3">最新發文</h3>
-                                <div className="text-gray-300 text-sm leading-relaxed mb-2">
-                                    {lastPost?.content || <span className="italic text-gray-600">(純圖片/轉發)</span>}
-                                </div>
-                                <div className="flex justify-between items-center mt-3">
-                                    <div className="text-[10px] text-gray-600">ID: {lastPost?.id}</div>
-                                    <div className="text-right text-xs text-gray-500 font-mono">
-                                        {lastPostTime ? lastPostTime.toLocaleString() : ''}
-                                    </div>
+                                <h3 className="text-xs text-gray-500 uppercase mb-3 flex items-center"><MessageSquare className="w-3 h-3 mr-1" /> 最新發文 (Last 10)</h3>
+                                <div className="space-y-3 max-h-80 overflow-y-auto custom-scroll pr-1">
+                                    {posts.slice(0, 10).map((post) => (
+                                        <div key={post.id} className="border-b border-gray-800 pb-2 last:border-0">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="text-[10px] text-sky-500 font-mono">{new Date(post.createdAt).toLocaleTimeString([], {month:'numeric', day:'numeric', hour: '2-digit', minute:'2-digit'})}</span>
+                                            </div>
+                                            <p className="text-gray-300 text-xs leading-relaxed">{simpleTranslate(post.content) || <span className="italic text-gray-600">(純圖片/轉發)</span>}</p>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
-
-                            <div className="text-center text-[10px] text-gray-600 pt-4 pb-8">
-                                資料來源: {dataSource} | 總數: {posts.length} 筆 | 更新: {lastUpdated?.toLocaleTimeString()}
-                            </div>
-
+                            <div className="text-center text-[10px] text-gray-600 pt-4 pb-8">資料來源: {dataSource} | 總數: {posts.length} 筆 | 更新: {lastUpdated?.toLocaleTimeString()}</div>
                         </div>
                     ) : (
-                        // Loading State
                         <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500 px-6 text-center">
                              <RefreshCw className="w-12 h-12 mb-4 animate-spin text-sky-500" />
                              <h3 className="text-lg font-bold text-gray-300 mb-2">系統初始化中...</h3>
