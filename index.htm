@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Elon Mobile Tactical | 戰術分析</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <style>
+        body {
+            background-color: #000000; /* Pure Black for OLED mobile */
+            color: #e2e8f0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .stat-value {
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: 700;
+        }
+        /* Mobile Optimizations */
+        .mobile-card {
+            background-color: #111;
+            border: 1px solid #333;
+            border-radius: 12px;
+        }
+        .safe-area-bottom {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .glow-text {
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(5px);
+        }
+        .stat-divider {
+            border-right: 1px solid #333;
+        }
+        @keyframes flash-green {
+            0% { color: white; }
+            50% { color: #34d399; text-shadow: 0 0 15px #34d399; }
+            100% { color: white; }
+        }
+        .animate-flash {
+            animation: flash-green 1s ease-in-out;
+        }
+        /* Horizontal Scroll Hide */
+        .hide-scroll::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scroll {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+        // --- Inline Icons ---
+        const IconBase = ({ path, className = "w-4 h-4" }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className}
+            >
+                {path}
+            </svg>
+        );
+
+        const Activity = (props) => <IconBase {...props} path={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />} />;
+        const Clock = (props) => <IconBase {...props} path={<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>} />;
+        const Terminal = (props) => <IconBase {...props} path={<><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></>} />;
+        const RefreshCw = (props) => <IconBase {...props} path={<><path d="M23 4v6h-6" /><path d="M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></>} />;
+        const ChevronDown = (props) => <IconBase {...props} path={<polyline points="6 9 12 15 18 9" />} />;
+        const ChevronUp = (props) => <IconBase {...props} path={<polyline points="18 15 12 9 6 15" />} />;
+        const CheckCircle = (props) => <IconBase {...props} path={<g><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></g>} />;
+        const FileText = (props) => <IconBase {...props} path={<g><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></g>} />;
+        const ExternalLink = (props) => <IconBase {...props} path={<g><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></g>} />;
+        const Lock = (props) => <IconBase {...props} path={<g><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></g>} />;
+        const BarChart2 = (props) => <IconBase {...props} path={<g><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></g>} />;
+        const Zap = (props) => <IconBase {...props} path={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />} />;
+        const History = (props) => <IconBase {...props} path={<g><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></g>} />;
+        const Trending = (props) => <IconBase {...props} path={<polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />} />;
+
+        const App = () => {
+            // --- State ---
+            const [posts, setPosts] = useState([]);
+            const [userInfo, setUserInfo] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [lastUpdated, setLastUpdated] = useState(null);
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [dataSource, setDataSource] = useState("init"); 
+            const [showControls, setShowControls] = useState(false); // Default Hidden
+            const [errorMsg, setErrorMsg] = useState(null);
+            const [showAuthModal, setShowAuthModal] = useState(false);
+            const [isNewPost, setIsNewPost] = useState(false);
+            
+            // 獨立的「最新發文數」狀態
+            const [specialCount, setSpecialCount] = useState(null);
+            const prevSpecialCountRef = useRef(null);
+
+            // --- Time Setup ---
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            // --- API Fetching (Main System) ---
+            const fetchFromApi = useCallback(async () => {
+                setLoading(true);
+                // Prefer CORS Proxy IO as it usually works without explicit auth
+                const corsURL = 'https://corsproxy.io/?'; 
+                
+                try {
+                    // 2. Get Posts (90 days)
+                    const endDate = new Date();
+                    const startDate = new Date();
+                    startDate.setDate(startDate.getDate() - 90); 
+
+                    const postsTarget = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
+                    const postsUrl = `${corsURL}${encodeURIComponent(postsTarget)}`;
+                    
+                    const postsRes = await fetch(postsUrl);
+
+                    if (!postsRes.ok) {
+                         if (postsRes.status === 403) {
+                             // Only show auth modal if using cors-anywhere, but here we try to be silent first
+                             // If fail, we might switch method or show controls
+                             setShowControls(true); 
+                         }
+                         throw new Error(`連線錯誤 HTTP ${postsRes.status}`);
+                    }
+
+                    const postsJson = await postsRes.json();
+                    let postsData = postsJson.data || [];
+
+                    if (Array.isArray(postsData) && postsData.length > 0) {
+                        processData(postsData);
+                        setDataSource("Live API (90 Days)");
+                        setShowControls(false); // Hide controls on success
+                        setErrorMsg(null);
+                        
+                        // Try get User Info silently
+                        try {
+                            const userTarget = "https://xtracker.polymarket.com/api/users/elonmusk";
+                            const userRes = await fetch(`${corsURL}${encodeURIComponent(userTarget)}`);
+                            if (userRes.ok) {
+                                const uData = await userRes.json();
+                                if (uData.success) setUserInfo(uData.data);
+                            }
+                        } catch(e) {}
+
+                    } else {
+                        // console.warn("Main API returned empty data");
+                    }
+
+                } catch (err) {
+                    console.error("Main fetch failed:", err);
+                    setErrorMsg(`${err.message}`);
+                    setShowControls(true); // Show controls on error
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
+
+            // --- 獨立的特殊計數 Fetch (每秒更新 + 觸發連動) ---
+            useEffect(() => {
+                const fetchSpecialData = async () => {
+                    const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
+                    // Using corsproxy.io as primary
+                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+                    
+                    try {
+                        const response = await fetch(proxyUrl);
+                        if (response.ok) {
+                            const json = await response.json();
+                            if (json.success && Array.isArray(json.data)) {
+                                const newCount = json.data.length;
+                                if (prevSpecialCountRef.current !== null && newCount !== prevSpecialCountRef.current) {
+                                    setIsNewPost(true);
+                                    setTimeout(() => setIsNewPost(false), 2000); 
+                                    fetchFromApi(); 
+                                }
+                                prevSpecialCountRef.current = newCount;
+                                setSpecialCount(newCount);
+                            } else {
+                                setSpecialCount(0);
+                            }
+                        } else {
+                            setSpecialCount("N/A");
+                        }
+                    } catch (error) {
+                        // Silent fail for special counter to avoid spamming
+                        setSpecialCount("N/A");
+                    }
+                };
+
+                fetchSpecialData();
+                const interval = setInterval(fetchSpecialData, 1000);
+                return () => clearInterval(interval);
+            }, [fetchFromApi]); 
+
+            // Auto Load on Mount
+            useEffect(() => {
+                fetchFromApi();
+            }, [fetchFromApi]);
+
+
+            // --- Helper: Parsing Logic ---
+            const processData = (rawData) => {
+                const sorted = [...rawData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                setPosts(sorted);
+                setLastUpdated(new Date());
+            };
+
+            const parseCSV = (text) => {
+                const lines = text.split(/\r?\n/);
+                if (lines.length < 2) return [];
+                const parseLine = (line) => {
+                    const result = [];
+                    let start = 0;
+                    let inQuotes = false;
+                    for (let i = 0; i < line.length; i++) {
+                        if (line[i] === '"') { inQuotes = !inQuotes; } 
+                        else if (line[i] === ',' && !inQuotes) { result.push(line.substring(start, i)); start = i + 1; }
+                    }
+                    result.push(line.substring(start));
+                    return result.map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
+                };
+                const headers = parseLine(lines[0]);
+                const idIdx = headers.findIndex(h => h.includes("Tweet ID"));
+                const contentIdx = headers.findIndex(h => h.includes("Content"));
+                const dateIdx = headers.findIndex(h => h.includes("Posted At") || h.includes("Posted Date"));
+                const timeIdx = headers.findIndex(h => h.includes("Posted Time"));
+                const results = [];
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    try {
+                        const cols = parseLine(lines[i]);
+                        let dateStr = cols[dateIdx];
+                        if (dateStr && !dateStr.includes(":") && timeIdx !== -1) { dateStr += " " + cols[timeIdx]; }
+                        const dateObj = new Date(dateStr);
+                        if (!isNaN(dateObj)) {
+                            results.push({ id: cols[idIdx], content: cols[contentIdx], createdAt: dateObj.toISOString() });
+                        }
+                    } catch (e) {}
+                }
+                return results;
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const parsed = parseCSV(evt.target.result);
+                        if (parsed.length > 0) {
+                            processData(parsed);
+                            setDataSource(`CSV: ${file.name}`);
+                            setShowControls(false);
+                            setErrorMsg(null);
+                        } else { setErrorMsg("解析失敗：找不到有效數據"); }
+                    } catch (err) { setErrorMsg("檔案讀取錯誤"); }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- Logic & Analysis ---
+            const etTimeStr = currentTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
+            
+            const lastPost = posts.length > 0 ? posts[0] : null;
+            const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
+            
+            let hoursSinceLast = 0;
+            if (lastPostTime) {
+                const diffMs = new Date() - lastPostTime;
+                hoursSinceLast = diffMs / (1000 * 60 * 60);
+            }
+
+            // Stats 1: Historical Cycle Rate (Baseline)
+            const historicalStats = useMemo(() => {
+                if (posts.length === 0) return {};
+                const windows = [1, 6, 12, 24];
+                const res = {};
+                const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
+                
+                windows.forEach(win => {
+                    const winMs = win * 60 * 60 * 1000;
+                    let max = 0, min = Infinity, sum = 0, samples = 0;
+                    const start = timestamps[0];
+                    const end = timestamps[timestamps.length - 1];
+                    for (let t = start; t <= end; t += 3600000) {
+                        const count = timestamps.filter(ts => ts >= t && ts < t + winMs).length;
+                        if (count > max) max = count;
+                        if (count < min) min = count;
+                        sum += count;
+                        samples++;
+                    }
+                    res[win] = { 
+                        avg: samples > 0 ? sum / samples : 0, 
+                        max, 
+                        min: min === Infinity ? 0 : min 
+                    };
+                });
+                return res;
+            }, [posts]);
+
+            // Stats 2: Real-time vs History Comparison (Deep History 4 Weeks)
+            const realTimeComparison = useMemo(() => {
+                if (posts.length === 0) return null;
+                const now = new Date();
+                
+                const getCountInWindow = (refTime, hours) => {
+                    const start = new Date(refTime.getTime() - hours * 60 * 60 * 1000);
+                    return posts.filter(p => {
+                        const pt = new Date(p.createdAt);
+                        return pt >= start && pt <= refTime;
+                    }).length;
+                };
+
+                const windows = [1, 6, 12, 24];
+                const data = {};
+
+                windows.forEach(h => {
+                    const current = getCountInWindow(now, h);
+                    const w1 = getCountInWindow(new Date(now.getTime() - 7 * 24 * 3600 * 1000), h);
+                    const w2 = getCountInWindow(new Date(now.getTime() - 14 * 24 * 3600 * 1000), h);
+                    const w3 = getCountInWindow(new Date(now.getTime() - 21 * 24 * 3600 * 1000), h);
+                    const w4 = getCountInWindow(new Date(now.getTime() - 28 * 24 * 3600 * 1000), h);
+
+                    data[h] = { current, history: [w1, w2, w3, w4] };
+                });
+
+                return data;
+            }, [posts, currentTime]);
+
+            // Stats 3: Velocity & Ratio (Current vs Historical Avg)
+            const velocityStats = useMemo(() => {
+                if (!historicalStats[1] || !realTimeComparison) return {};
+                const res = {};
+                [1, 6, 12, 24].forEach(h => {
+                    const current = realTimeComparison[h].current;
+                    const avg = historicalStats[h].avg;
+                    const diff = current - avg;
+                    const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
+                    res[h] = { current, avg: avg.toFixed(1), diff: diff.toFixed(1), ratio: ratio.toFixed(0) };
+                });
+                return res;
+            }, [historicalStats, realTimeComparison]);
+
+            // Probability Logic
+            const tacticalData = useMemo(() => {
+                if (posts.length < 2) return null; 
+                const sorted = [...posts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                const gaps = [];
+                for (let i = 0; i < sorted.length - 1; i++) {
+                    const diff = (new Date(sorted[i].createdAt) - new Date(sorted[i+1].createdAt)) / 3600000;
+                    if (diff > 0) gaps.push(diff);
+                }
+                const currentS = hoursSinceLast;
+                const calcP = (h) => {
+                    const denom = gaps.filter(g => g >= currentS).length;
+                    if (denom === 0) return 0;
+                    const num = gaps.filter(g => g >= currentS && g <= currentS + h).length;
+                    return (num / denom) * 100;
+                };
+                
+                let status = "正常活動";
+                let statusColor = "text-emerald-400";
+                let advice = "監控中，無異常。";
+                if (currentS < 0.5) { status = "🔥 剛剛發文"; statusColor = "text-red-500 font-bold glow-text"; advice = "目標剛發文。密切注意是否開啟連續發文模式。"; }
+                else if (currentS > 6 && currentS < 9) { status = "🛌 可能睡眠中"; statusColor = "text-yellow-400"; advice = "靜默 > 6 小時。根據歷史作息，醒來後常伴隨高頻發文。"; }
+                
+                return { probs: [calcP(1), calcP(2), calcP(3), calcP(4)], status, statusColor, advice };
+            }, [posts, hoursSinceLast]);
+
+            // --- UI Components ---
+            const RateRow = ({ label, data }) => {
+                if (!data) return null;
+                const diffVal = parseFloat(data.diff);
+                const isHigh = diffVal > 0;
+                return (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+                        <div className="w-8 text-xs text-gray-400 font-medium">{label}</div>
+                        
+                        <div className="flex-1 px-1">
+                            <div className="flex justify-between items-end mb-1">
+                                <span className="text-xs text-gray-500">Avg: {data.avg}</span>
+                                <span className="text-sm font-bold text-white">{data.current}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                                <span className={`${isHigh ? 'text-red-400' : 'text-emerald-400'} flex items-center`}>
+                                    {isHigh ? '+' : ''}{data.diff} 
+                                    {isHigh ? <span className="text-[8px] ml-0.5">▲</span> : <span className="text-[8px] ml-0.5">▼</span>}
+                                </span>
+                                <span className={`font-mono ${parseInt(data.ratio) > 150 ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
+                                    {data.ratio}%
+                                </span>
+                            </div>
+                            {/* Visual Bar */}
+                            <div className="w-full bg-gray-800 h-1 mt-1 rounded overflow-hidden">
+                                <div className={`h-full ${isHigh ? 'bg-red-500' : 'bg-emerald-500'}`} style={{width: `${Math.min(parseInt(data.ratio)/2, 100)}%`}}></div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const HistoryCompareRow = ({ label, data }) => {
+                if (!data) return null;
+                return (
+                    <div className="py-2 border-b border-gray-800 last:border-0">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs text-sky-400 font-bold w-8">{label}</span>
+                            <span className="text-xs text-white font-mono bg-gray-800 px-1.5 rounded">{data.current}</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1 text-center">
+                            {data.history.map((val, idx) => (
+                                <div key={idx} className="flex flex-col items-center bg-gray-900/50 rounded py-1">
+                                    <span className="text-[9px] text-gray-500">-{idx+1}W</span>
+                                    <span className={`text-[10px] font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>
+                                        {val}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            const ProbBar = ({ hour, percent }) => (
+                <div className="flex-1 bg-gray-900 rounded p-2 text-center border border-gray-800 mx-1 first:ml-0 last:mr-0">
+                    <div className="text-xs text-gray-400 mb-1">{hour}H 內</div>
+                    <div className={`text-lg font-bold ${percent > 50 ? 'text-emerald-400' : 'text-gray-300'}`}>
+                        {percent.toFixed(0)}%
+                    </div>
+                    <div className="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
+                        <div className="bg-emerald-500 h-full transition-all duration-500" style={{width: `${percent}%`}}></div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen pb-safe-area-bottom">
+                    {/* 1. Top Sticky Header */}
+                    <div className="sticky top-0 z-50 bg-black/90 backdrop-blur border-b border-gray-800 px-4 py-3 flex justify-between items-center shadow-lg">
+                        <div className="flex items-center space-x-2">
+                            {userInfo ? (
+                                <img src={userInfo.avatarUrl} alt="User" className="w-8 h-8 rounded-full border border-gray-600" />
+                            ) : (
+                                <Terminal className="w-6 h-6 text-sky-500" />
+                            )}
+                            <div>
+                                <div className="font-bold tracking-tight text-gray-100 leading-none flex items-center">
+                                    ELON TACTICAL
+                                    {userInfo?.verified && <CheckCircle className="w-3 h-3 text-blue-400 ml-1" />}
+                                </div>
+                                <div className={`text-[10px] font-mono tracking-wider ${dataSource.includes("Live") ? "text-emerald-500" : "text-sky-500"}`}>
+                                    ● {dataSource.toUpperCase()}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex flex-col items-end">
+                            <div className="text-2xl font-mono font-bold text-emerald-400 leading-none">
+                                {etTimeStr}<span className="text-xs text-emerald-600 ml-1">ET</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 mt-1">
+                                Local: {currentTime.getHours().toString().padStart(2,'0')}:{currentTime.getMinutes().toString().padStart(2,'0')}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. Controls (Hidden by default, shown on error) */}
+                    <div className="bg-[#0a0a0a] border-b border-gray-900">
+                        {showControls ? (
+                            <div className="px-4 py-2 animate-in slide-in-from-top-2 space-y-2">
+                                <div className="flex justify-between items-center text-xs text-red-400 mb-1">
+                                    <span>⚠️ {errorMsg || "連線需注意"}</span>
+                                    <button onClick={() => setShowControls(false)} className="text-gray-500">隱藏</button>
+                                </div>
+                                <button onClick={fetchFromApi} disabled={loading} className="w-full bg-sky-900/30 text-sky-400 border border-sky-800 py-3 rounded text-sm font-medium flex justify-center items-center">
+                                    {loading ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : "重試連線"}
+                                </button>
+                                <label className="flex items-center justify-center w-full bg-emerald-900/30 text-emerald-400 border border-emerald-800 py-3 rounded text-sm font-medium cursor-pointer">
+                                    <FileText className="w-4 h-4 mr-2" />
+                                    <span>匯入 .csv 檔案</span>
+                                    <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                                </label>
+                            </div>
+                        ) : (
+                            <div className="flex justify-center">
+                                <button onClick={() => setShowControls(true)} className="text-gray-700 hover:text-gray-500 pt-1 pb-2">
+                                    <ChevronDown className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {posts.length > 0 ? (
+                        <div className="p-4 space-y-4">
+                            
+                            {/* 3. Hero Status Card (SPLIT LAYOUT) */}
+                            <div className="mobile-card p-5 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-4 opacity-10">
+                                    <Clock className="w-24 h-24 text-white" />
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    {/* Left: Silence Time */}
+                                    <div className="stat-divider pr-4">
+                                        <div className="text-gray-400 text-[10px] uppercase tracking-widest mb-1">目前靜默時間 (Silence)</div>
+                                        <div className={`text-4xl font-bold font-mono my-1 ${hoursSinceLast > 6 ? 'text-red-400' : 'text-white'}`}>
+                                            {hoursSinceLast.toFixed(2)}<span className="text-sm text-gray-500 ml-1">hr</span>
+                                        </div>
+                                        <div className="flex items-center text-xs mt-1 space-x-1">
+                                            <div className={`w-1.5 h-1.5 rounded-full ${hoursSinceLast > 6 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+                                            <span className={tacticalData?.statusColor || 'text-gray-300'}>{tacticalData?.status}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Right: Latest Post Count */}
+                                    <div className="pl-2">
+                                        <div className="text-gray-400 text-[10px] uppercase tracking-widest mb-1">最新發文數 (Latest)</div>
+                                        <div className={`text-4xl font-bold font-mono my-1 text-white ${isNewPost ? 'animate-flash' : ''}`}>
+                                            {specialCount !== null ? specialCount : "--"}
+                                            <span className="text-sm text-gray-500 ml-1">篇</span>
+                                        </div>
+                                        <div className="flex items-center text-xs mt-1 text-sky-500">
+                                            <Zap className={`w-3 h-3 mr-1 ${isNewPost ? 'animate-bounce' : ''}`} />
+                                            <span>{isNewPost ? '更新中...' : '即時獨立監控'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-gray-800 text-sm text-gray-400 leading-relaxed">
+                                    <span className="text-sky-500 font-bold">戰術提示：</span>
+                                    {tacticalData?.advice}
+                                </div>
+                            </div>
+
+                            {/* 4. Probability Section */}
+                            <div>
+                                <h3 className="text-xs text-gray-500 uppercase mb-2 ml-1">發文機率預測 (AI Prediction)</h3>
+                                <div className="flex justify-between">
+                                    {tacticalData && tacticalData.probs.map((p, i) => (
+                                        <ProbBar key={i} hour={i+1} percent={p} />
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 5. SPLIT VIEW: Velocity & Ratio vs Deep History Comparison */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {/* Left Column: Velocity & Ratio (Current vs Avg) */}
+                                <div className="mobile-card px-4 py-2">
+                                    <h3 className="text-xs text-gray-500 uppercase mt-2 mb-1 flex items-center">
+                                        <Trending className="w-3 h-3 mr-1" />
+                                        速率強度 (Velocity Ratio)
+                                    </h3>
+                                    {velocityStats[1] && (
+                                        <>
+                                            <RateRow label="1H" data={velocityStats[1]} />
+                                            <RateRow label="6H" data={velocityStats[6]} />
+                                            <RateRow label="12H" data={velocityStats[12]} />
+                                            <RateRow label="24H" data={velocityStats[24]} />
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Right Column: Deep History Comparison (-1W to -4W) */}
+                                <div className="mobile-card px-4 py-2 overflow-x-auto hide-scroll">
+                                    <div className="min-w-[280px]">
+                                        <h3 className="text-xs text-sky-500 uppercase mt-2 mb-1 flex items-center justify-between">
+                                            <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史回推比較 (4 Weeks)</div>
+                                            <div className="text-[9px] text-gray-600">Now vs History</div>
+                                        </h3>
+                                        {realTimeComparison && (
+                                            <>
+                                                <HistoryCompareRow label="1H" data={realTimeComparison[1]} />
+                                                <HistoryCompareRow label="6H" data={realTimeComparison[6]} />
+                                                <HistoryCompareRow label="12H" data={realTimeComparison[12]} />
+                                                <HistoryCompareRow label="24H" data={realTimeComparison[24]} />
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 6. Last Post */}
+                            <div className="mobile-card p-4">
+                                <h3 className="text-xs text-gray-500 uppercase mb-3">最新發文</h3>
+                                <div className="text-gray-300 text-sm leading-relaxed mb-2">
+                                    {lastPost?.content || <span className="italic text-gray-600">(純圖片/轉發)</span>}
+                                </div>
+                                <div className="flex justify-between items-center mt-3">
+                                    <div className="text-[10px] text-gray-600">ID: {lastPost?.id}</div>
+                                    <div className="text-right text-xs text-gray-500 font-mono">
+                                        {lastPostTime ? lastPostTime.toLocaleString() : ''}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="text-center text-[10px] text-gray-600 pt-4 pb-8">
+                                資料來源: {dataSource} | 總數: {posts.length} 筆 | 更新: {lastUpdated?.toLocaleTimeString()}
+                            </div>
+
+                        </div>
+                    ) : (
+                        // Loading State
+                        <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500 px-6 text-center">
+                             <RefreshCw className="w-12 h-12 mb-4 animate-spin text-sky-500" />
+                             <h3 className="text-lg font-bold text-gray-300 mb-2">系統初始化中...</h3>
+                             <p className="text-sm mb-6 text-gray-500">正在建立衛星連線 (Auto Connect)</p>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
