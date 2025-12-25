@@ -229,38 +229,55 @@
 
             // --- Prediction Logic with Time-Weighted Scoring & Percentiles ---
             useEffect(() => {
+                // Wait for posts and valid hours
                 if (!posts.length || parsedHours === null) {
                     setPrediction(null);
                     return;
                 }
 
+                // Wait for specialCount to be populated (or fallback to 0 if not yet loaded but that's risky)
+                // We use specialCount as the base. If specialCount is null, we can't project TOTAL.
+                // Assuming specialCount is loaded quickly. If not, we might need a fallback or wait.
+                const currentTotal = (typeof specialCount === 'number') ? specialCount : 0;
+
                 const windowMs = parsedHours * 3600 * 1000;
+                
+                // Get all valid timestamps sorted ascending (oldest to newest)
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
                 
-                if (timestamps.length < 10) return; 
+                if (timestamps.length < 10) return; // Need some data
 
                 const startTime = timestamps[0];
                 const endTime = timestamps[timestamps.length - 1];
                 const totalDuration = endTime - startTime;
                 
+                // If history is too short for prediction window
                 if (totalDuration < windowMs) return;
 
                 let counts = [];
+                // Sliding window every 1 hour over the entire history
+                // We store both the count and the timestamp of the window start
                 for (let t = startTime; t <= endTime - windowMs; t += 3600000) {
                     const rangeEnd = t + windowMs;
+                    // Filter posts in this historical window
                     const count = timestamps.filter(ts => ts >= t && ts < rangeEnd).length;
                     counts.push({ count, time: t });
                 }
 
                 if (counts.length > 0) {
-                    const splitIndex = Math.floor(counts.length * (2/3)); 
-                    const pastData = counts.slice(0, splitIndex); 
-                    const recentData = counts.slice(splitIndex);  
+                    // Split into Recent (latest 1/3) and Past (older 2/3)
+                    const splitIndex = Math.floor(counts.length * (2/3)); // Start of the last 1/3
+                    
+                    const pastData = counts.slice(0, splitIndex); // Oldest 66%
+                    const recentData = counts.slice(splitIndex);  // Newest 33%
 
                     const calcAvg = (arr) => arr.length ? arr.reduce((a,b)=>a+b.count,0) / arr.length : 0;
+                    
+                    // Base Averages
                     const pastAvg = calcAvg(pastData);
                     const recentAvg = calcAvg(recentData);
                     
+                    // Weighted Average (70% Recent, 30% Past)
                     let weightedAvg = 0;
                     if (recentData.length > 0 && pastData.length > 0) {
                         weightedAvg = (recentAvg * 0.7) + (pastAvg * 0.3);
@@ -268,31 +285,29 @@
                         weightedAvg = calcAvg(counts);
                     }
 
+                    // Percentiles from total dataset for range context
                     const allCounts = counts.map(c => c.count).sort((a, b) => a - b);
                     const getPercentile = (p) => allCounts[Math.floor((allCounts.length - 1) * p)];
                     
-                    const min = allCounts[0];
-                    const p25 = getPercentile(0.25);
-                    const p50 = getPercentile(0.50);
-                    const p75 = getPercentile(0.75);
-                    const max = allCounts[allCounts.length - 1]; 
+                    // Raw Predicted Values (Delta)
+                    const minDelta = allCounts[0];
+                    const p25Delta = getPercentile(0.25);
+                    const p50Delta = getPercentile(0.50);
+                    const p75Delta = getPercentile(0.75);
+                    const maxDelta = allCounts[allCounts.length - 1]; 
+                    const avgDelta = weightedAvg;
 
-                    // Probability Calculation
-                    const calculateProbability = (targetVal) => {
-                        const tolerance = Math.max(1, Math.round(targetVal * 0.1)); 
-                        const matchingWindows = counts.filter(c => Math.abs(c.count - targetVal) <= tolerance).length;
-                        return ((matchingWindows / counts.length) * 100).toFixed(0);
-                    };
-
+                    // Confidence Score (based on recent consistency)
                     const avgProb = Math.min(100, Math.max(30, 100 - Math.abs(weightedAvg - recentAvg)*5)).toFixed(0);
 
+                    // Add current total to get projected final counts
                     setPrediction({ 
-                        min, 
-                        p25,
-                        p50,
-                        p75,
-                        max, 
-                        avg: weightedAvg.toFixed(1), 
+                        min: minDelta + currentTotal, 
+                        p25: p25Delta + currentTotal,
+                        p50: p50Delta + currentTotal,
+                        p75: p75Delta + currentTotal,
+                        max: maxDelta + currentTotal, 
+                        avg: (avgDelta + currentTotal).toFixed(1), // The requested weighted prediction + current
                         hours: parsedHours.toFixed(1),
                         avgProb
                     });
@@ -300,7 +315,7 @@
                     setPrediction(null);
                 }
 
-            }, [posts, parsedHours]);
+            }, [posts, parsedHours, specialCount]);
 
             // --- API Fetching (Main System) ---
             const fetchFromApi = useCallback(async () => {
@@ -599,37 +614,80 @@
                     return (num / denom) * 100;
                 };
 
+                // Time-of-Day based Long Silence Probability
+                // Logic: Compare current situation with historical days at the EXACT SAME TIME of day.
+                // If it is 18:00 now and silence is 2h, we look at 18:00 on previous days.
+                // Was there also a 2h silence (meaning last post <= 16:00)?
+                // If yes, did that silence continue for > 4h (until 20:00)?
+                
                 const timeOfDaySamples = [];
-                const checkTimeBase = currentTime; 
+                const checkTimeBase = currentTime; // Current time (e.g., 18:00)
                 const dayMs = 24 * 60 * 60 * 1000;
                 
+                // We assume currentS is the current silence duration in hours (e.g. 2.0)
+                // Threshold to consider "same situation": 
+                // We check if on historical day at [checkTimeBase - d days], the user had been silent for AT LEAST currentS hours.
+                
                 for (let d = 1; d <= 90; d++) {
-                    const historicalRefTime = new Date(checkTimeBase.getTime() - d * dayMs);
-                    const postsBefore = posts.filter(p => new Date(p.createdAt) <= historicalRefTime);
+                    // This is the historical "now" (e.g. 18:00 yesterday)
+                    const historicalNow = new Date(checkTimeBase.getTime() - d * dayMs);
+                    
+                    // What was the last post BEFORE historicalNow?
+                    // Posts array is Newest to Oldest. We want the first post that is older than historicalNow.
+                    const postsBefore = posts.filter(p => new Date(p.createdAt) <= historicalNow);
                     
                     if (postsBefore.length > 0) {
                         const lastPostBeforeNow = postsBefore[0];
-                        const historicalSilence = (historicalRefTime - new Date(lastPostBeforeNow.createdAt)) / 3600000;
+                        const historicalSilence = (historicalNow - new Date(lastPostBeforeNow.createdAt)) / 3600000;
                         
+                        // Condition: Did the historical day match our current silence?
+                        // i.e., was he ALREADY silent for 'currentS' hours at that time?
                         if (historicalSilence >= currentS) {
-                            const postsAfter = posts.filter(p => new Date(p.createdAt) > historicalRefTime);
+                            // Yes, this is a comparable scenario.
+                            // Now, how long did this silence actually last?
+                            // We need to find the NEXT post after historicalNow.
+                            // The posts array is descending. We need the last post in the array of "posts NEWER than historicalNow".
+                            const postsAfter = posts.filter(p => new Date(p.createdAt) > historicalNow);
+                            
                             let totalSilenceDuration = 0;
                             
                             if (postsAfter.length > 0) {
+                                // The post immediately following historicalNow is the last one in this filtered array
                                 const nextPost = postsAfter[postsAfter.length - 1];
+                                // Total silence = (Next Post Time - Last Post Before Now Time)
+                                // But we are interested in "Total duration from Last Post".
+                                // Or "Additional duration from Now"? 
+                                // User query: "如果前面只有其中1天發生過16靜默到20點(這樣4小時) 代表 >4H機率是1/90"
+                                // This implies we count the TOTAL duration of that silence gap.
                                 totalSilenceDuration = (new Date(nextPost.createdAt) - new Date(lastPostBeforeNow.createdAt)) / 3600000;
                             } else {
+                                // No post after historicalNow yet? (Maybe data ends, or he is still silent in that timeline? Unlikely for 90 days ago)
+                                // If recent data, maybe he hasn't posted. But we are looking back.
+                                // If no next post found in dataset (e.g. dataset cut off), we ignore or assume max.
+                                // Let's ignore if we can't find the end of the silence.
                                 continue; 
                             }
+                            
+                            // We collect the TOTAL duration of silence for matching days
                             timeOfDaySamples.push(totalSilenceDuration);
                         }
                     }
                 }
 
-                const totalSamples = timeOfDaySamples.length;
+                const totalSamples = timeOfDaySamples.length; // Denominator (Days where he was silent for at least currentS at this time)
+                
+                // Calculate P(Total Silence > X) given Current Silence
+                // Note: user query implies "greater than 4H" means total silence duration > 4H? 
+                // Or "additional" 4H?
+                // "16靜默到20點(這樣4小時)" -> This is a 4 hour gap.
+                // If current is 2h (16-18), and we want probability of >4h total (16-20),
+                // we count how many samples had total duration > 4.
+                
                 const calcTimeProb = (targetTotalH) => {
                     if (totalSamples === 0) return 0;
+                    // If target is less than we already have, prob is 100% (already achieved)
                     if (targetTotalH <= currentS) return 100;
+                    
                     const count = timeOfDaySamples.filter(duration => duration > targetTotalH).length;
                     return ((count / totalSamples) * 100).toFixed(0);
                 };
@@ -640,7 +698,7 @@
                     p8h: calcTimeProb(8),
                     p10h: calcTimeProb(10),
                     p12h: calcTimeProb(12),
-                    sampleSize: totalSamples 
+                    sampleSize: totalSamples // Useful for debug/display
                 };
                 
                 let status = "正常活動";
@@ -664,9 +722,13 @@
                 const ratioNum = parseInt(data.ratio);
                 const isHigh = ratioNum >= 100;
                 
+                // Calculate Avg/H (Current Speed)
                 const currentSpeed = (parseFloat(data.current) / hours).toFixed(1);
+                
+                // Calculate History Avg/H for comparison logic
                 const historyAvgSpeed = (parseFloat(data.avg) / hours);
 
+                // Speed comparison color logic
                 let speedColorClass = "text-gray-500"; 
                 const speedDiff = parseFloat(currentSpeed) - historyAvgSpeed;
                 
@@ -677,6 +739,7 @@
                      speedColorClass = "text-emerald-500"; 
                 }
 
+                // Estimated additional posts based on current speed
                 const estimatedMore = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours).toFixed(1) : "0.0";
 
                 return (
@@ -684,6 +747,7 @@
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <div className="flex items-center space-x-2">
+                                {/* Estimation Badge */}
                                 <div className="text-[9px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="依此速度預估剩餘發文數">
                                     <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
                                     +{estimatedMore}
@@ -719,6 +783,7 @@
                         <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
                             <span className="text-sm text-sky-400 font-bold w-10">{label}</span>
                             <div className="flex items-center space-x-3">
+                                {/* Moved 7D Avg to the LEFT of Current */}
                                 <div className="flex flex-col items-end leading-none">
                                      <span className="text-[9px] text-gray-500">7D Avg: {data.avg7d}</span>
                                      <span className={`text-[9px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio7d}%</span>
@@ -887,7 +952,7 @@
                                     {prediction ? (
                                         <span className="text-white animate-in fade-in block">
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-sky-400 font-bold text-sm">未來 {prediction.hours} 小時加權預測:</span>
+                                                <span className="text-sky-400 font-bold text-sm">未來 {prediction.hours} 小時加權預測 <span className="text-xs font-normal text-gray-400">(含目前總數)</span>:</span>
                                                 <span className="text-[10px] text-gray-500 bg-gray-900 px-2 py-0.5 rounded-full border border-gray-800">近期權重 70%</span>
                                             </div>
                                             <div className="space-y-2">
@@ -926,7 +991,7 @@
                                             </div>
                                         </span>
                                     ) : (
-                                        tacticalData?.advice || "輸入時數以開始預測..." 
+                                        tacticalData?.advice || "輸入時數以開始預測..." // Corrected access
                                     )}
                                 </div>
                             </div>
