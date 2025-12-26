@@ -162,8 +162,8 @@
             const targetDate = useMemo(() => {
                 const now = new Date(); // Local
                 let year = now.getFullYear();
-                if (now.getMonth() === 11 && now.getDate() > 26) year++; 
-                const target = new Date(Date.UTC(year, 11, 26, 17, 0, 0)); 
+                if (now.getMonth() === 11 && now.getDate() > 30) year++; 
+                const target = new Date(Date.UTC(year, 11, 30, 17, 0, 0)); 
                 return target;
             }, []);
 
