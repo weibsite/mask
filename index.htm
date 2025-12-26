@@ -377,7 +377,7 @@
             // --- 獨立的特殊計數 Fetch (可手動觸發) ---
             const fetchSpecialData = useCallback(async () => {
                 setLoadingSpecial(true);
-                const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-19T17:00:00.000Z&endDate=2025-12-26T17:00:59.000Z";
+                const targetUrl = "https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=2025-12-24T17:00:00.000Z&endDate=2025-12-30T17:00:59.000Z";
                 const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
                 
                 try {
