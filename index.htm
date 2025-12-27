@@ -111,8 +111,8 @@
         /* Heatmap Table */
         .heat-cell {
             font-family: monospace;
-            font-size: 10px;
-            height: 20px;
+            font-size: 9px; /* Reduced font size */
+            height: 14px;   /* Reduced height to remove scroll need */
             display: flex;
             align-items: center;
             justify-content: center;
@@ -286,6 +286,20 @@
                 }).replace(/(\d+)/, '\n$1');
             };
 
+            // Calculate Grand Total for the active range
+            const activeRangeTotal = useMemo(() => {
+                if (!gridData) return 0;
+                let sum = 0;
+                gridData.grid.forEach((row, hIdx) => {
+                    row.forEach((val, dIdx) => {
+                        const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                        const isActive = cellTimeMs >= gridData.activeStart.getTime() && cellTimeMs < gridData.activeEnd.getTime();
+                        if (isActive) sum += val;
+                    });
+                });
+                return sum;
+            }, [gridData]);
+
             return (
                 <div className="mobile-card p-4 mb-4">
                     <div className="flex justify-between items-center mb-4">
@@ -333,16 +347,13 @@
                                 </div>
                                 {/* Rows */}
                                 {gridData.grid.map((row, hIdx) => (
-                                    <div key={hIdx} className="flex h-5 mb-[1px]">
-                                        <div className="w-8 text-[9px] text-gray-600 text-right pr-2 leading-[20px] font-mono flex-shrink-0">
+                                    <div key={hIdx} className="flex h-[15px] mb-[1px]">
+                                        <div className="w-8 text-[9px] text-gray-600 text-right pr-2 leading-[15px] font-mono flex-shrink-0">
                                             {hIdx.toString().padStart(2, '0')}:00
                                         </div>
                                         {row.map((val, dIdx) => {
                                             const cellTime = new Date(gridData.headers[dIdx]);
                                             // Ensure cellTime hours are added in UTC ms to avoid local DST shifts
-                                            // The headers are already 00:00 ET (05:00 UTC). Adding hIdx hours works linearly.
-                                            // We use setHours on the Date object which works locally, BUT headers are constructed from UTC ms.
-                                            // Safer to just add ms:
                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
                                             
                                             return (
@@ -358,7 +369,9 @@
                                 ))}
                                 {/* Total Row */}
                                 <div className="flex h-6 mt-1 border-t border-gray-800 pt-1">
-                                     <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">Total</div>
+                                     <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">
+                                        {activeRangeTotal}
+                                     </div>
                                      {gridData.grid[0].map((_, dIdx) => {
                                          // Sum column ONLY for active range
                                          const colSum = gridData.grid.reduce((acc, row, hIdx) => {
@@ -1099,7 +1112,8 @@
                 const additional = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours) : 0;
                 // Latest Count + Estimated Additional
                 const totalProjected = (typeof currentTotal === 'number' ? currentTotal : 0) + additional;
-                
+                const baseTotal = typeof currentTotal === 'number' ? currentTotal : 0;
+
                 // Helper for Percentage Calculation
                 const calcPercent = (val) => {
                     if(!totalPosts) return "0.0";
@@ -1112,6 +1126,7 @@
                             <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <div className="flex items-center space-x-2">
                                 <div className="text-[10px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="最新發文數 + (目前速度 * 剩餘時數)">
+                                    <span className="text-gray-500 mr-1.5 font-mono">P{data.pos.toFixed(0)}</span>
                                     <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
                                     {totalProjected.toFixed(1)}
                                 </div>
@@ -1124,18 +1139,16 @@
                         
                         <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
                             <div className="flex flex-col items-center clickable-stat hover:text-emerald-400" onClick={() => onDetailClick({label, data, hours, type: 'min'})} title="點擊查看最低紀錄">
-                                <span>Min: {data.min}</span>
-                                <span className="text-[9px] text-gray-600">({calcPercent(data.min)}%)</span>
+                                <span>Min: {baseTotal + data.min}</span>
                             </div>
                             <div className="flex flex-col items-center">
                                 <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio}%</span>
                                 <span className="text-gray-400 clickable-stat hover:text-sky-400" onClick={() => onDetailClick({label, data, hours, type: 'avg'})} title="點擊查看平均計算">
-                                    Avg: {data.avg} <span className="text-[9px] text-gray-600">({calcPercent(parseFloat(data.avg))}%)</span>
+                                    Avg: {(baseTotal + parseFloat(data.avg)).toFixed(1)}
                                 </span>
                             </div>
                             <div className="flex flex-col items-center clickable-stat hover:text-red-400" onClick={() => onDetailClick({label, data, hours, type: 'max'})} title="點擊查看最高紀錄">
-                                <span>Max: {data.max}</span>
-                                <span className="text-[9px] text-gray-600">({calcPercent(data.max)}%)</span>
+                                <span>Max: {baseTotal + data.max}</span>
                             </div>
                         </div>
                         <div className="gauge-track w-full mt-1">
