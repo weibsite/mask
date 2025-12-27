@@ -40,6 +40,16 @@
         .modal-backdrop {
             background-color: rgba(0, 0, 0, 0.85);
             backdrop-filter: blur(5px);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
         .stat-divider {
             border-right: 1px solid #333;
@@ -86,6 +96,46 @@
             background: #333; 
             border-radius: 2px;
         }
+        .clickable-stat {
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 4px;
+            padding: 0 4px;
+        }
+        .clickable-stat:active {
+            background-color: rgba(255,255,255,0.1);
+        }
+        .clickable-stat:hover {
+            color: #38bdf8; /* Sky-400 */
+        }
+        /* Heatmap Table */
+        .heat-cell {
+            font-family: monospace;
+            font-size: 10px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #222;
+        }
+        .heat-cell-inactive {
+            background-color: #000;
+            color: #333;
+        }
+        .heat-cell-0 {
+            background-color: #064e3b; /* Emerald 900 */
+            color: #6ee7b7;
+        }
+        .heat-cell-active {
+            background-color: #059669; /* Emerald 600 */
+            color: white;
+        }
+        .heat-cell-hot {
+            background-color: #34d399; /* Emerald 400 */
+            color: #fff;
+            font-weight: bold;
+            text-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -94,33 +144,20 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-        // --- Inline Icons (Fixed JSX structure) ---
+        // --- Inline Icons ---
         const IconBase = ({ path, className = "w-4 h-4" }) => (
-            <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                className={className}
-            >
-                {path}
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg>
         );
-
         const Activity = (props) => <IconBase {...props} path={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />} />;
-        // Fixed: Use <g> wrapper
         const Clock = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></g>} />;
         const Terminal = (props) => <IconBase {...props} path={<g><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></g>} />;
         const RefreshCw = (props) => <IconBase {...props} path={<g><path d="M23 4v6h-6" /><path d="M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></g>} />;
         const ChevronDown = (props) => <IconBase {...props} path={<polyline points="6 9 12 15 18 9" />} />;
         const ChevronUp = (props) => <IconBase {...props} path={<polyline points="18 15 12 9 6 15" />} />;
+        const ChevronLeft = (props) => <IconBase {...props} path={<polyline points="15 18 9 12 15 6" />} />;
+        const ChevronRight = (props) => <IconBase {...props} path={<polyline points="9 18 15 12 9 6" />} />;
         const CheckCircle = (props) => <IconBase {...props} path={<g><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></g>} />;
         const FileText = (props) => <IconBase {...props} path={<g><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></g>} />;
-        const ExternalLink = (props) => <IconBase {...props} path={<g><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></g>} />;
-        const Lock = (props) => <IconBase {...props} path={<g><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></g>} />;
         const BarChart2 = (props) => <IconBase {...props} path={<g><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></g>} />;
         const Zap = (props) => <IconBase {...props} path={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />} />;
         const History = (props) => <IconBase {...props} path={<g><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></g>} />;
@@ -128,10 +165,221 @@
         const Calculator = (props) => <IconBase {...props} path={<g><rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="16" y1="14" x2="16" y2="18" /><path d="M16 10h.01" /><path d="M12 10h.01" /><path d="M8 10h.01" /><path d="M12 14h.01" /><path d="M8 14h.01" /><path d="M12 18h.01" /><path d="M8 18h.01" /></g>} />;
         const MessageSquare = (props) => <IconBase {...props} path={<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />} />;
         const Target = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></g>} />;
-        const Repeat = (props) => <IconBase {...props} path={<g><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></g>} />;
         const Forward = (props) => <IconBase {...props} path={<g><polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" /></g>} />;
         const Moon = (props) => <IconBase {...props} path={<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />} />;
         const AlertOctagon = (props) => <IconBase {...props} path={<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />} />;
+        const XCircle = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></g>} />;
+        const Calendar = (props) => <IconBase {...props} path={<g><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></g>} />;
+
+        // --- Weekly Heatmap Component ---
+        const WeeklyHeatmap = ({ posts }) => {
+            const [selectedDate, setSelectedDate] = useState(new Date());
+            const [viewMonth, setViewMonth] = useState(new Date());
+
+            // Helper: Get Tuesdays and Fridays in a month
+            const getKeyDates = (date) => {
+                const year = date.getFullYear();
+                const month = date.getMonth();
+                const dates = [];
+                const d = new Date(year, month, 1);
+                while (d.getMonth() === month) {
+                    const day = d.getDay();
+                    if (day === 2 || day === 5) { // Tuesday (2) or Friday (5)
+                        dates.push(new Date(d));
+                    }
+                    d.setDate(d.getDate() + 1);
+                }
+                return dates;
+            };
+
+            const keyDates = useMemo(() => getKeyDates(viewMonth), [viewMonth]);
+
+            // Default to latest key date available in current view if just opened
+            useEffect(() => {
+                if (keyDates.length > 0 && selectedDate.getMonth() !== viewMonth.getMonth()) {
+                     setSelectedDate(keyDates[keyDates.length - 1]);
+                }
+            }, [viewMonth]);
+
+            const changeMonth = (delta) => {
+                const newDate = new Date(viewMonth);
+                newDate.setMonth(newDate.getMonth() + delta);
+                setViewMonth(newDate);
+            };
+
+            // Build Grid Data
+            const gridData = useMemo(() => {
+                if (!selectedDate) return null;
+                
+                // --- FIX: Strictly use ET (UTC-5) Logic ---
+                // Avoids local timezone shifts (e.g., Asia/Taipei +8 vs ET -5 is 13h difference)
+                
+                const year = selectedDate.getFullYear();
+                const month = selectedDate.getMonth();
+                const date = selectedDate.getDate();
+                
+                // ET is UTC-5 (Assuming Standard Time for Polymarket context)
+                // 00:00 ET = 05:00 UTC
+                const etOffset = 5; 
+                
+                // Grid Start: Day 0, 00:00 ET -> 05:00 UTC
+                const gridStartTimeMs = Date.UTC(year, month, date, etOffset, 0, 0);
+                
+                // Active Period Start: Day 0, 12:00 ET -> 17:00 UTC
+                const activeStartMs = Date.UTC(year, month, date, 12 + etOffset, 0, 0);
+                
+                const oneDay = 24 * 60 * 60 * 1000;
+                const endOfPeriodMs = activeStartMs + 7 * oneDay;
+                
+                // Initialize Grid [24 hours][8 days]
+                const grid = Array(24).fill(0).map(() => Array(8).fill(0));
+                
+                posts.forEach(p => {
+                    const t = new Date(p.createdAt).getTime(); // Input is UTC
+                    const diffMs = t - gridStartTimeMs; // Difference from Grid Start (ET 00:00)
+                    
+                    if (diffMs >= 0) {
+                        const diffHours = Math.floor(diffMs / 3600000);
+                        const dayIdx = Math.floor(diffHours / 24);
+                        const hourIdx = diffHours % 24;
+                        
+                        // We map up to 8 days to cover the overlap (Tue-Tue)
+                        if (dayIdx >= 0 && dayIdx < 8) {
+                            grid[hourIdx][dayIdx]++;
+                        }
+                    }
+                });
+                
+                // Column Headers (Timestamps for 00:00 ET)
+                const headers = [];
+                for(let i=0; i<8; i++) {
+                    headers.push(new Date(gridStartTimeMs + i * oneDay));
+                }
+                
+                return { 
+                    grid, 
+                    headers, 
+                    activeStart: new Date(activeStartMs), 
+                    activeEnd: new Date(endOfPeriodMs) 
+                };
+
+            }, [selectedDate, posts]);
+
+            const getCellClass = (val, dayIdx, hourIdx, activeStart, activeEnd, currentCellTime) => {
+                // Determine if in active range (Strictly timestamp based)
+                const isActive = currentCellTime >= activeStart && currentCellTime < activeEnd;
+                
+                if (!isActive) return "heat-cell-inactive text-gray-700";
+                
+                if (val === 0) return "heat-cell-0"; // Dark Green per request
+                if (val >= 10) return "heat-cell-hot"; // Bright, White text
+                // Default active but low count
+                return "bg-emerald-800 text-emerald-100";
+            };
+
+            const formatHeaderDate = (d) => {
+                // Force formatted date to be in New York time to match the grid buckets
+                return d.toLocaleDateString('zh-TW', {
+                    timeZone: 'America/New_York',
+                    weekday: 'short',
+                    day: 'numeric'
+                }).replace(/(\d+)/, '\n$1');
+            };
+
+            return (
+                <div className="mobile-card p-4 mb-4">
+                    <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center space-x-2">
+                            <Calendar className="w-4 h-4 text-sky-500" />
+                            <h3 className="text-sm font-bold text-gray-200">週期熱力圖 (12:00 ET Base)</h3>
+                        </div>
+                        <div className="flex items-center bg-gray-900 rounded-lg p-1 border border-gray-700">
+                            <button onClick={() => changeMonth(-1)} className="p-1 hover:text-white text-gray-500"><ChevronLeft className="w-4 h-4"/></button>
+                            <span className="mx-2 text-xs font-mono font-bold w-16 text-center">
+                                {viewMonth.getFullYear()}/{viewMonth.getMonth()+1}
+                            </span>
+                            <button onClick={() => changeMonth(1)} className="p-1 hover:text-white text-gray-500"><ChevronRight className="w-4 h-4"/></button>
+                        </div>
+                    </div>
+                    
+                    {/* Date Selector Pills */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        {keyDates.map(d => (
+                            <button 
+                                key={d.toISOString()}
+                                onClick={() => setSelectedDate(d)}
+                                className={`text-[10px] font-mono px-3 py-1.5 rounded border transition-all ${
+                                    selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth()
+                                    ? "bg-white text-black border-white font-bold" 
+                                    : "bg-gray-900 text-gray-400 border-gray-700 hover:border-gray-500"
+                                }`}
+                            >
+                                {d.getDate()}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Heatmap Grid */}
+                    {gridData && (
+                        <div className="overflow-x-auto">
+                             <div className="min-w-[300px]">
+                                {/* Header Row */}
+                                <div className="flex ml-8 mb-1">
+                                    {gridData.headers.map((d, i) => (
+                                        <div key={i} className="flex-1 text-center text-[9px] text-gray-400 leading-tight whitespace-pre">
+                                            {formatHeaderDate(d)}
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* Rows */}
+                                {gridData.grid.map((row, hIdx) => (
+                                    <div key={hIdx} className="flex h-5 mb-[1px]">
+                                        <div className="w-8 text-[9px] text-gray-600 text-right pr-2 leading-[20px] font-mono flex-shrink-0">
+                                            {hIdx.toString().padStart(2, '0')}:00
+                                        </div>
+                                        {row.map((val, dIdx) => {
+                                            const cellTime = new Date(gridData.headers[dIdx]);
+                                            // Ensure cellTime hours are added in UTC ms to avoid local DST shifts
+                                            // The headers are already 00:00 ET (05:00 UTC). Adding hIdx hours works linearly.
+                                            // We use setHours on the Date object which works locally, BUT headers are constructed from UTC ms.
+                                            // Safer to just add ms:
+                                            const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                                            
+                                            return (
+                                                <div 
+                                                    key={dIdx} 
+                                                    className={`flex-1 mx-[1px] rounded-sm heat-cell ${getCellClass(val, dIdx, hIdx, gridData.activeStart, gridData.activeEnd, new Date(cellTimeMs))}`}
+                                                >
+                                                    {val > 0 ? val : ''}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ))}
+                                {/* Total Row */}
+                                <div className="flex h-6 mt-1 border-t border-gray-800 pt-1">
+                                     <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">Total</div>
+                                     {gridData.grid[0].map((_, dIdx) => {
+                                         // Sum column ONLY for active range
+                                         const colSum = gridData.grid.reduce((acc, row, hIdx) => {
+                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                                             const isActive = cellTimeMs >= gridData.activeStart.getTime() && cellTimeMs < gridData.activeEnd.getTime();
+                                             return isActive ? acc + row[dIdx] : acc;
+                                         }, 0);
+                                         
+                                         return (
+                                             <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">
+                                                 {colSum}
+                                             </div>
+                                         )
+                                     })}
+                                </div>
+                             </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
 
         const App = () => {
             // --- State ---
@@ -145,6 +393,7 @@
             const [errorMsg, setErrorMsg] = useState(null);
             const [showAuthModal, setShowAuthModal] = useState(false);
             const [isNewPost, setIsNewPost] = useState(false);
+            const [selectedStatDetail, setSelectedStatDetail] = useState(null); // 用於控制 Modal 顯示
             
             // 獨立的「最新發文數」狀態
             const [specialCount, setSpecialCount] = useState(null);
@@ -510,6 +759,29 @@
             // --- UI Formatters ---
             const formatTime = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
             const formatDay = (date) => ['週日','週一','週二','週三','週四','週五','週六'][date.getDay()];
+            const formatDateTimeFull = (timestamp) => {
+                if (!timestamp) return "N/A";
+                return new Date(timestamp).toLocaleString('zh-TW', {
+                    timeZone: 'America/New_York',
+                    month: 'numeric', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit',
+                    weekday: 'short'
+                }) + " (ET)";
+            };
+
+            // --- New Helper for Range Display ---
+            const formatTimeRange = (startTs, h) => {
+                if (!startTs) return "N/A";
+                const startDate = new Date(startTs);
+                const endDate = new Date(startTs + h * 3600000);
+                
+                // Format: MM/DD HH:mm ~ HH:mm
+                const dateStr = startDate.toLocaleDateString('zh-TW', {month:'numeric', day:'numeric', timeZone: 'America/New_York'});
+                const startStr = startDate.toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
+                const endStr = endDate.toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
+                
+                return `${dateStr} ${startStr} ~ ${endStr} (${h}H)`;
+            };
 
             // --- Stats Logic ---
             let hoursSinceLast = 0;
@@ -542,19 +814,46 @@
                 const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; 
                 const res = {};
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
+                
+                const start = timestamps[0];
+                const end = timestamps[timestamps.length - 1]; // Newest post time
+
                 windows.forEach(win => {
                     const winMs = win * 60 * 60 * 1000;
                     let max = 0, min = Infinity, sum = 0, samples = 0;
-                    const start = timestamps[0];
-                    const end = timestamps[timestamps.length - 1];
-                    for (let t = start; t <= end; t += 3600000) {
+                    
+                    // Add tracking for Min/Max occurrences
+                    let maxTime = null;
+                    let minTime = null;
+
+                    const searchLimit = end - winMs;
+
+                    for (let t = start; t <= searchLimit; t += 3600000) {
                         const count = timestamps.filter(ts => ts >= t && ts < t + winMs).length;
-                        if (count > max) max = count;
-                        if (count < min) min = count;
+                        
+                        if (count > max) { 
+                            max = count; 
+                            maxTime = t; 
+                        }
+                        if (count < min) { 
+                            min = count; 
+                            minTime = t; 
+                        }
+                        
                         sum += count;
                         samples++;
                     }
-                    res[win] = { avg: samples > 0 ? sum / samples : 0, max, min: min === Infinity ? 0 : min };
+                    if (min === Infinity) { min = 0; minTime = start; }
+
+                    res[win] = { 
+                        avg: samples > 0 ? sum / samples : 0, 
+                        max, 
+                        min, 
+                        maxTime, 
+                        minTime, 
+                        samples, 
+                        totalSum: sum 
+                    };
                 });
                 return res;
             }, [posts]);
@@ -591,7 +890,21 @@
                     else if (current > 0) pos = 100;
                     pos = Math.max(0, Math.min(100, pos));
                     const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
-                    res[h] = { current, avg: avg.toFixed(1), min: stats.min, max: stats.max, pos, ratio: ratio.toFixed(0) };
+                    
+                    // Pass full stats including calculation evidence
+                    res[h] = { 
+                        current, 
+                        avg: avg.toFixed(1), 
+                        min: stats.min, 
+                        max: stats.max, 
+                        pos, 
+                        ratio: ratio.toFixed(0),
+                        // Detailed Logic Data
+                        maxTime: stats.maxTime,
+                        minTime: stats.minTime,
+                        samples: stats.samples,
+                        totalSum: stats.totalSum
+                    };
                 });
                 return res;
             }, [historicalStats, realTimeComparison]);
@@ -615,79 +928,37 @@
                 };
 
                 // Time-of-Day based Long Silence Probability
-                // Logic: Compare current situation with historical days at the EXACT SAME TIME of day.
-                // If it is 18:00 now and silence is 2h, we look at 18:00 on previous days.
-                // Was there also a 2h silence (meaning last post <= 16:00)?
-                // If yes, did that silence continue for > 4h (until 20:00)?
-                
                 const timeOfDaySamples = [];
-                const checkTimeBase = currentTime; // Current time (e.g., 18:00)
+                const checkTimeBase = currentTime; 
                 const dayMs = 24 * 60 * 60 * 1000;
                 
-                // We assume currentS is the current silence duration in hours (e.g. 2.0)
-                // Threshold to consider "same situation": 
-                // We check if on historical day at [checkTimeBase - d days], the user had been silent for AT LEAST currentS hours.
-                
                 for (let d = 1; d <= 90; d++) {
-                    // This is the historical "now" (e.g. 18:00 yesterday)
                     const historicalNow = new Date(checkTimeBase.getTime() - d * dayMs);
-                    
-                    // What was the last post BEFORE historicalNow?
-                    // Posts array is Newest to Oldest. We want the first post that is older than historicalNow.
                     const postsBefore = posts.filter(p => new Date(p.createdAt) <= historicalNow);
                     
                     if (postsBefore.length > 0) {
                         const lastPostBeforeNow = postsBefore[0];
                         const historicalSilence = (historicalNow - new Date(lastPostBeforeNow.createdAt)) / 3600000;
                         
-                        // Condition: Did the historical day match our current silence?
-                        // i.e., was he ALREADY silent for 'currentS' hours at that time?
                         if (historicalSilence >= currentS) {
-                            // Yes, this is a comparable scenario.
-                            // Now, how long did this silence actually last?
-                            // We need to find the NEXT post after historicalNow.
-                            // The posts array is descending. We need the last post in the array of "posts NEWER than historicalNow".
                             const postsAfter = posts.filter(p => new Date(p.createdAt) > historicalNow);
-                            
                             let totalSilenceDuration = 0;
-                            
                             if (postsAfter.length > 0) {
-                                // The post immediately following historicalNow is the last one in this filtered array
                                 const nextPost = postsAfter[postsAfter.length - 1];
-                                // Total silence = (Next Post Time - Last Post Before Now Time)
-                                // But we are interested in "Total duration from Last Post".
-                                // Or "Additional duration from Now"? 
-                                // User query: "如果前面只有其中1天發生過16靜默到20點(這樣4小時) 代表 >4H機率是1/90"
-                                // This implies we count the TOTAL duration of that silence gap.
                                 totalSilenceDuration = (new Date(nextPost.createdAt) - new Date(lastPostBeforeNow.createdAt)) / 3600000;
                             } else {
-                                // No post after historicalNow yet? (Maybe data ends, or he is still silent in that timeline? Unlikely for 90 days ago)
-                                // If recent data, maybe he hasn't posted. But we are looking back.
-                                // If no next post found in dataset (e.g. dataset cut off), we ignore or assume max.
-                                // Let's ignore if we can't find the end of the silence.
                                 continue; 
                             }
-                            
-                            // We collect the TOTAL duration of silence for matching days
                             timeOfDaySamples.push(totalSilenceDuration);
                         }
                     }
                 }
 
-                const totalSamples = timeOfDaySamples.length; // Denominator (Days where he was silent for at least currentS at this time)
-                
-                // Calculate P(Total Silence > X) given Current Silence
-                // Note: user query implies "greater than 4H" means total silence duration > 4H? 
-                // Or "additional" 4H?
-                // "16靜默到20點(這樣4小時)" -> This is a 4 hour gap.
-                // If current is 2h (16-18), and we want probability of >4h total (16-20),
-                // we count how many samples had total duration > 4.
+                const totalSamples = timeOfDaySamples.length; 
                 
                 const calcTimeProb = (targetTotalH) => {
                     if (totalSamples === 0) return 0;
-                    // If target is less than we already have, prob is 100% (already achieved)
                     if (targetTotalH <= currentS) return 100;
-                    
                     const count = timeOfDaySamples.filter(duration => duration > targetTotalH).length;
                     return ((count / totalSamples) * 100).toFixed(0);
                 };
@@ -698,7 +969,7 @@
                     p8h: calcTimeProb(8),
                     p10h: calcTimeProb(10),
                     p12h: calcTimeProb(12),
-                    sampleSize: totalSamples // Useful for debug/display
+                    sampleSize: totalSamples 
                 };
                 
                 let status = "正常活動";
@@ -716,22 +987,107 @@
                 };
             }, [posts, hoursSinceLast, currentTime]);
 
-            // --- UI Components ---
-            const RateRow = ({ label, data, hours, remainingHours }) => {
+            // --- Stats Detail Modal Component ---
+            const StatsDetailModal = ({ detail, onClose }) => {
+                if (!detail) return null;
+                const { label, data, hours } = detail;
+                
+                return (
+                    <div className="modal-backdrop" onClick={onClose}>
+                        <div className="bg-[#111] border border-gray-700 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                            <div className="bg-gray-900 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
+                                <div className="flex items-center space-x-2">
+                                    <BarChart2 className="w-5 h-5 text-sky-500" />
+                                    <h3 className="text-white font-bold text-lg">{label} 區間數據詳情</h3>
+                                </div>
+                                <button onClick={onClose} className="text-gray-400 hover:text-white"><XCircle className="w-6 h-6" /></button>
+                            </div>
+                            
+                            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                                <div className="text-xs text-gray-500 text-center mb-2">
+                                    基於過去 90 天內，共 {data.samples.toLocaleString()} 個 {label} 滑動視窗樣本分析
+                                </div>
+
+                                {/* Min Section */}
+                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-emerald-500 font-bold flex items-center"><ChevronDown className="w-4 h-4 mr-1"/>歷史最低 (MIN)</span>
+                                        <span className="text-2xl font-mono font-bold text-white">{data.min} <span className="text-xs text-gray-500">篇</span></span>
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 space-y-1">
+                                        <div className="flex justify-between">
+                                            <span>發生時間:</span>
+                                            <span className="text-emerald-400 font-mono">{formatTimeRange(data.minTime, hours)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>情境:</span>
+                                            <span>該 {hours} 小時內發文量最低點</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Avg Section */}
+                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-sky-500 font-bold flex items-center"><Activity className="w-4 h-4 mr-1"/>歷史平均 (AVG)</span>
+                                        <span className="text-2xl font-mono font-bold text-white">{data.avg} <span className="text-xs text-gray-500">篇</span></span>
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 space-y-1 border-t border-gray-700/50 pt-2">
+                                        <div className="flex justify-between">
+                                            <span>計算公式:</span>
+                                            <span className="font-mono">總發文計數 / 總樣本數</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-300">
+                                            <span>運算過程:</span>
+                                            <span className="font-mono">{data.totalSum.toLocaleString()} / {data.samples.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Max Section */}
+                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-red-500 font-bold flex items-center"><ChevronUp className="w-4 h-4 mr-1"/>歷史最高 (MAX)</span>
+                                        <span className="text-2xl font-mono font-bold text-white">{data.max} <span className="text-xs text-gray-500">篇</span></span>
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 space-y-1">
+                                        <div className="flex justify-between">
+                                            <span>發生時間:</span>
+                                            <span className="text-red-400 font-mono">{formatTimeRange(data.maxTime, hours)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>情境:</span>
+                                            <span>該 {hours} 小時內發文量最高點</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Current Context */}
+                                <div className="bg-sky-900/10 rounded-lg p-3 border border-sky-800/30 mt-2">
+                                    <div className="text-xs text-sky-400 mb-1 font-bold">目前狀態</div>
+                                    <div className="flex justify-between text-xs text-gray-300">
+                                        <span>目前 {label} 累積: <span className="text-white font-bold">{data.current}</span> 篇</span>
+                                        <span>強度: <span className={`${parseInt(data.ratio) > 100 ? 'text-red-400' : 'text-emerald-400'}`}>{data.ratio}%</span> (vs Avg)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // --- Updated RateRow with Percentage and Total Posts reference ---
+            const RateRow = ({ label, data, hours, remainingHours, currentTotal, totalPosts, onDetailClick }) => {
                 if (!data) return null;
                 const ratioNum = parseInt(data.ratio);
                 const isHigh = ratioNum >= 100;
                 
                 // Calculate Avg/H (Current Speed)
                 const currentSpeed = (parseFloat(data.current) / hours).toFixed(1);
-                
-                // Calculate History Avg/H for comparison logic
                 const historyAvgSpeed = (parseFloat(data.avg) / hours);
 
-                // Speed comparison color logic
                 let speedColorClass = "text-gray-500"; 
                 const speedDiff = parseFloat(currentSpeed) - historyAvgSpeed;
-                
                 if (speedDiff > 0) {
                     if (parseFloat(currentSpeed) > historyAvgSpeed * 1.2) speedColorClass = "text-red-500 font-bold"; 
                     else speedColorClass = "text-orange-400"; 
@@ -740,17 +1096,24 @@
                 }
 
                 // Estimated additional posts based on current speed
-                const estimatedMore = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours).toFixed(1) : "0.0";
+                const additional = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours) : 0;
+                // Latest Count + Estimated Additional
+                const totalProjected = (typeof currentTotal === 'number' ? currentTotal : 0) + additional;
+                
+                // Helper for Percentage Calculation
+                const calcPercent = (val) => {
+                    if(!totalPosts) return "0.0";
+                    return ((val / totalPosts) * 100).toFixed(1);
+                }
 
                 return (
                     <div className="py-3 border-b border-gray-800 last:border-0">
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
                             <div className="flex items-center space-x-2">
-                                {/* Estimation Badge */}
-                                <div className="text-[9px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="依此速度預估剩餘發文數">
+                                <div className="text-[10px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="最新發文數 + (目前速度 * 剩餘時數)">
                                     <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
-                                    +{estimatedMore}
+                                    {totalProjected.toFixed(1)}
                                 </div>
                                 <div className={`text-[10px] font-mono bg-gray-900 px-1 rounded border border-gray-800 ${speedColorClass}`}>
                                     {currentSpeed}/h
@@ -760,12 +1123,20 @@
                         </div>
                         
                         <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
-                            <span>Min: {data.min}</span>
+                            <div className="flex flex-col items-center clickable-stat hover:text-emerald-400" onClick={() => onDetailClick({label, data, hours, type: 'min'})} title="點擊查看最低紀錄">
+                                <span>Min: {data.min}</span>
+                                <span className="text-[9px] text-gray-600">({calcPercent(data.min)}%)</span>
+                            </div>
                             <div className="flex flex-col items-center">
                                 <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio}%</span>
-                                <span className="text-gray-400">Avg: {data.avg}</span>
+                                <span className="text-gray-400 clickable-stat hover:text-sky-400" onClick={() => onDetailClick({label, data, hours, type: 'avg'})} title="點擊查看平均計算">
+                                    Avg: {data.avg} <span className="text-[9px] text-gray-600">({calcPercent(parseFloat(data.avg))}%)</span>
+                                </span>
                             </div>
-                            <span>Max: {data.max}</span>
+                            <div className="flex flex-col items-center clickable-stat hover:text-red-400" onClick={() => onDetailClick({label, data, hours, type: 'max'})} title="點擊查看最高紀錄">
+                                <span>Max: {data.max}</span>
+                                <span className="text-[9px] text-gray-600">({calcPercent(data.max)}%)</span>
+                            </div>
                         </div>
                         <div className="gauge-track w-full mt-1">
                             <div className="gauge-fill" style={{width: `${data.pos}%`}}></div>
@@ -803,17 +1174,6 @@
                 );
             };
 
-            const ProbBar = ({ hour, percent }) => (
-                <div className="flex-1 bg-gray-900 rounded p-2 text-center border border-gray-800 mx-1 first:ml-0 last:mr-0">
-                    <div className="text-xs text-gray-400 mb-1">{hour}H 內</div>
-                    <div className={`text-lg font-bold ${percent > 50 ? 'text-emerald-400' : 'text-gray-300'}`}>{percent.toFixed(0)}%</div>
-                    <div className="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
-                        <div className="bg-emerald-500 h-full transition-all duration-500" style={{width: `${percent}%`}}></div>
-                    </div>
-                </div>
-            );
-
-            // New component for Long Silence Probability
             const SilenceProbBadge = ({ label, prob }) => {
                 const p = parseInt(prob);
                 let color = "text-gray-500";
@@ -1000,19 +1360,22 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {/* Velocity */}
                                 <div className="mobile-card px-4 py-2">
-                                    <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center"><Trending className="w-3 h-3 mr-1" /> 速率強度 (Range)</h3>
+                                    <h3 className="text-sm text-gray-500 uppercase mt-2 mb-1 flex items-center justify-between">
+                                        <div className="flex items-center"><Trending className="w-3 h-3 mr-1" /> 速率強度 (Range)</div>
+                                        <div className="text-[9px] text-gray-600 font-normal">點擊數值查看計算細節</div>
+                                    </h3>
                                     {velocityStats[1] && (
                                         <>
-                                            <RateRow label="1H" hours={1} data={velocityStats[1]} remainingHours={hoursToTarget} />
-                                            <RateRow label="6H" hours={6} data={velocityStats[6]} remainingHours={hoursToTarget} />
-                                            <RateRow label="12H" hours={12} data={velocityStats[12]} remainingHours={hoursToTarget} />
-                                            <RateRow label="1天" hours={24} data={velocityStats[24]} remainingHours={hoursToTarget} />
-                                            <RateRow label="2天" hours={48} data={velocityStats[48]} remainingHours={hoursToTarget} />
-                                            <RateRow label="3天" hours={72} data={velocityStats[72]} remainingHours={hoursToTarget} />
-                                            <RateRow label="4天" hours={96} data={velocityStats[96]} remainingHours={hoursToTarget} />
-                                            <RateRow label="5天" hours={120} data={velocityStats[120]} remainingHours={hoursToTarget} />
-                                            <RateRow label="6天" hours={144} data={velocityStats[144]} remainingHours={hoursToTarget} />
-                                            <RateRow label="7天" hours={168} data={velocityStats[168]} remainingHours={hoursToTarget} />
+                                            <RateRow label="1H" hours={1} data={velocityStats[1]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="6H" hours={6} data={velocityStats[6]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="12H" hours={12} data={velocityStats[12]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="1天" hours={24} data={velocityStats[24]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="2天" hours={48} data={velocityStats[48]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="3天" hours={72} data={velocityStats[72]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="4天" hours={96} data={velocityStats[96]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="5天" hours={120} data={velocityStats[120]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="6天" hours={144} data={velocityStats[144]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
+                                            <RateRow label="7天" hours={168} data={velocityStats[168]} remainingHours={hoursToTarget} currentTotal={specialCount} totalPosts={posts.length} onDetailClick={setSelectedStatDetail} />
                                         </>
                                     )}
                                 </div>
@@ -1040,6 +1403,9 @@
                                     </div>
                                 </div>
                             </div>
+
+                             {/* Weekly Heatmap (New Section) */}
+                            <WeeklyHeatmap posts={posts} />
 
                             {/* Last 10 Posts & RT Stats */}
                             <div className="mobile-card p-4">
@@ -1081,6 +1447,9 @@
                              <p className="text-sm mb-6 text-gray-500">正在建立衛星連線 (Auto Connect)</p>
                         </div>
                     )}
+                    
+                    {/* Render Modal */}
+                    <StatsDetailModal detail={selectedStatDetail} onClose={() => setSelectedStatDetail(null)} />
                 </div>
             );
         };
