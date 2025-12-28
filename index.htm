@@ -206,7 +206,12 @@
         const Calendar = (props) => <IconBase {...props} path={<g><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></g>} />;
         const PieChart = (props) => <IconBase {...props} path={<g><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></g>} />;
 
-        // --- Restored Components ---
+        // --- Define format helpers globally to avoid ReferenceError ---
+        const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
+        const formatDateET = (date) => date.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' });
+        const formatWeekdayET = (date) => date.toLocaleDateString('zh-TW', { timeZone: 'America/New_York', weekday: 'short' });
+
+        // --- Components ---
         const SilenceProbBadge = ({ label, prob }) => {
             const p = parseInt(prob);
             let color = "text-gray-500";
@@ -364,10 +369,80 @@
                 </div>
             );
         };
+        
+        // --- Range Analysis Modal ---
+        const RangeAnalysisModal = ({ data, onClose, currentCount, hoursToTarget }) => {
+            if (!data) return null;
+            const { range, prob } = data;
+            const [start, end] = range.split('~').map(Number);
+            const deltaStart = Math.max(0, start - currentCount);
+            const deltaEnd = Math.max(0, end - currentCount);
+            const reqSpeedMin = hoursToTarget > 0 ? deltaStart / hoursToTarget : 0;
+            const reqSpeedMax = hoursToTarget > 0 ? deltaEnd / hoursToTarget : 0;
+
+            const timeHalf = hoursToTarget / 2;
+            const targetMid = (start + end) / 2;
+            
+            let analysis = {
+                bg: "【精準著陸】如同火箭回收，需精確控制在區間內，不能太快也不能太慢。",
+                up: "維持均速在 " + reqSpeedMin.toFixed(2) + " ~ " + reqSpeedMax.toFixed(2) + " 篇/hr (精準控速)。",
+                down: "均速 > " + reqSpeedMax.toFixed(2) + " (衝過頭) 或 < " + reqSpeedMin.toFixed(2) + " (動力不足)。",
+                type: "正常區間"
+            };
+            
+            if (reqSpeedMax < 0.5) {
+                 analysis = {
+                    bg: "【靜默降落】目標是極低頻率互動，甚至完全靜默。",
+                    up: "保持絕對靜默，或僅進行極低頻率的按讚/轉推。",
+                    down: "只要出現連續發文 (>3篇) 或時速 > " + reqSpeedMax.toFixed(2) + "，即會失敗 (Overshoot)。",
+                    type: "低頻 (Low)"
+                };
+            } else if (reqSpeedMin > 3.0) {
+                 analysis = {
+                    bg: "【高速巡航】目標是維持高強度輸出，需持續有議題跟進。",
+                    up: "保持高昂的發文節奏，時速需維持在 > " + reqSpeedMin.toFixed(1) + "。",
+                    down: "出現 > 3小時的睡眠或休息 (時速 < " + reqSpeedMin.toFixed(1) + ") 將導致動力不足 (Undershoot)。",
+                    type: "激進 (Burst)"
+                };
+            }
+
+            return (
+                <div className="modal-backdrop" onClick={onClose}>
+                     <div className="bg-[#111] border border-gray-700 rounded-xl w-full max-w-sm p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <h3 className="text-white font-bold text-lg">區間分析: {range}</h3>
+                                <div className="text-xs text-gray-500">預測機率: <span className="text-emerald-400 font-bold">{prob}%</span></div>
+                            </div>
+                            <button onClick={onClose} className="text-gray-400"><XCircle className="w-5 h-5"/></button>
+                        </div>
+                        <div className="space-y-3">
+                            <div className="bg-gray-800/30 p-2 rounded border border-gray-700">
+                                <div className="text-[10px] text-sky-400 font-bold uppercase mb-1">情境背景 ({analysis.type})</div>
+                                <div className="text-xs text-gray-300">{analysis.bg}</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="bg-emerald-900/20 p-2 rounded border border-emerald-800/50">
+                                    <div className="text-[10px] text-emerald-400 font-bold uppercase mb-1">機率增加因素</div>
+                                    <div className="text-[10px] text-gray-300 leading-relaxed">{analysis.up}</div>
+                                </div>
+                                 <div className="bg-red-900/20 p-2 rounded border border-red-800/50">
+                                    <div className="text-[10px] text-red-400 font-bold uppercase mb-1">機率減少因素</div>
+                                    <div className="text-[10px] text-gray-300 leading-relaxed">{analysis.down}</div>
+                                </div>
+                            </div>
+                            <div className="text-[9px] text-gray-500 text-center pt-2">
+                                需在剩餘 {hoursToTarget.toFixed(1)}h 內增加 {deltaStart}~{deltaEnd} 篇 (均速 {reqSpeedMin.toFixed(2)}~{reqSpeedMax.toFixed(2)}/h)
+                            </div>
+                        </div>
+                     </div>
+                </div>
+            )
+        };
 
         const RangeProbabilities = ({ posts, currentCount, hoursToTarget }) => {
             const [probs, setProbs] = useState([]);
-            // Remove calculating state to prevent UI flashing
+            const [selectedRange, setSelectedRange] = useState(null);
 
             useEffect(() => {
                 if (!posts.length || hoursToTarget <= 0) {
@@ -375,38 +450,55 @@
                     return;
                 }
                 
-                // Do not clear probs or set a loading state that hides UI here.
-                
                 const timer = setTimeout(() => {
                     const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a,b)=>a-b);
                     const windowMs = hoursToTarget * 3600 * 1000;
-                    const samples = [];
+                    
+                    const now = Date.now();
+                    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+                    const cutoffTime = now - thirtyDaysMs;
+
                     const n = timestamps.length;
                     
-                    if (timestamps[n-1] - timestamps[0] < windowMs) {
-                         // setCalculating(false);
-                         return;
-                    }
+                    if (timestamps[n-1] - timestamps[0] < windowMs) return;
 
-                    // Sliding window sampling (every 1 hour)
+                    // Sliding window
                     let left = 0;
                     let right = 0;
+                    
+                    const samplesRecent = [];
+                    const samplesOld = [];
+
                     for (let t = timestamps[0]; t <= timestamps[n-1] - windowMs; t += 3600000) {
                         while (left < n && timestamps[left] < t) left++;
                         while (right < n && timestamps[right] < t + windowMs) right++;
-                        samples.push(right - left);
+                        const count = right - left;
+                        
+                        if (t >= cutoffTime) {
+                            samplesRecent.push(count);
+                        } else {
+                            samplesOld.push(count);
+                        }
                     }
                     
-                    const totalSamples = samples.length;
-                    if (totalSamples === 0) return;
+                    const calcBucketProbs = (samples) => {
+                        const total = samples.length;
+                        if (total === 0) return {};
+                        const counts = {};
+                        samples.forEach(delta => {
+                            const finalVal = (currentCount || 0) + delta;
+                            const bucketIdx = Math.floor(finalVal / 20);
+                            counts[bucketIdx] = (counts[bucketIdx] || 0) + 1;
+                        });
+                        const probs = {};
+                        for(let k in counts) {
+                            probs[k] = counts[k] / total;
+                        }
+                        return probs;
+                    };
 
-                    const bucketCounts = {};
-                    
-                    samples.forEach(delta => {
-                        const finalVal = (currentCount || 0) + delta;
-                        const bucketIdx = Math.floor(finalVal / 20);
-                        bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
-                    });
+                    const probsRecent = calcBucketProbs(samplesRecent);
+                    const probsOld = calcBucketProbs(samplesOld);
                     
                     const results = [];
                     const maxBucketIdx = Math.floor(739 / 20); 
@@ -418,11 +510,23 @@
                         
                         if (end < currentCount) continue;
                         
-                        const count = bucketCounts[i] || 0;
-                        const prob = (count / totalSamples) * 100;
+                        // Weighted Probability: 70% Recent, 30% Old
+                        let prob = 0;
+                        const pR = probsRecent[i] || 0;
+                        const pO = probsOld[i] || 0;
+
+                        if (samplesRecent.length > 0 && samplesOld.length > 0) {
+                            prob = (pR * 0.7) + (pO * 0.3);
+                        } else if (samplesRecent.length > 0) {
+                            prob = pR;
+                        } else {
+                            prob = pO;
+                        }
                         
-                        if (prob >= 0.1) {
-                            results.push({ range: `${start}~${end}`, prob: prob.toFixed(1) });
+                        const probPercent = prob * 100;
+                        
+                        if (probPercent >= 0.1) {
+                            results.push({ range: `${start}~${end}`, prob: probPercent.toFixed(1) });
                         }
                     }
                     setProbs(results);
@@ -447,7 +551,11 @@
                         <div>
                              <div className="grid grid-cols-4 gap-2">
                                  {probs.map((p, idx) => (
-                                     <div key={idx} className="bg-gray-800/40 rounded p-2 text-center border border-gray-700/50">
+                                     <div 
+                                        key={idx} 
+                                        onClick={() => setSelectedRange(p)}
+                                        className="bg-gray-800/40 rounded p-2 text-center border border-gray-700/50 cursor-pointer hover:bg-gray-700/50 transition-colors"
+                                     >
                                          <div className="text-[10px] text-gray-400">{p.range}</div>
                                          <div className={`text-sm font-bold font-mono ${parseFloat(p.prob) > 20 ? 'text-emerald-400' : 'text-white'}`}>{p.prob}%</div>
                                      </div>
@@ -456,8 +564,17 @@
                         </div>
                     )}
                     <div className="text-[9px] text-gray-600 mt-2 text-right">
-                        基於過去90天滑動視窗模擬 | 過濾 &lt;0.1%
+                        近期權重 70% | 遠期權重 30% | 過濾 &lt;0.1%
                     </div>
+                    
+                    {selectedRange && (
+                        <RangeAnalysisModal 
+                            data={selectedRange} 
+                            currentCount={currentCount} 
+                            hoursToTarget={hoursToTarget} 
+                            onClose={() => setSelectedRange(null)} 
+                        />
+                    )}
                 </div>
             );
         };
@@ -465,7 +582,6 @@
 
         // --- Weekly Heatmap Component ---
         const WeeklyHeatmap = ({ posts, liveCount }) => {
-            // Initial state from localStorage or default
             const [selectedDate, setSelectedDate] = useState(() => {
                 const saved = localStorage.getItem('elon_tactical_heatmap_date');
                 return saved ? new Date(saved) : new Date();
@@ -475,7 +591,6 @@
                 return saved ? new Date(saved) : new Date();
             });
 
-            // Save preference when user selects a date
             const handleSelectDate = (date) => {
                 setSelectedDate(date);
                 localStorage.setItem('elon_tactical_heatmap_date', date.toISOString());
@@ -506,21 +621,11 @@
             };
             const availableKeyDates = useMemo(() => keyDates.filter(d => !isFutureDate(d)), [keyDates]);
 
-            // Auto-select logic (ONLY if current selection is not in the list and not just restored from storage)
-            // We want to preserve user selection if valid.
             useEffect(() => {
                 if (availableKeyDates.length > 0) {
-                     // Check if currently selected date is in the available list (comparing date strings)
                      const isSelectedInList = availableKeyDates.some(d => d.toDateString() === selectedDate.toDateString());
                      
                      if (!isSelectedInList) {
-                         // Only auto-select default (latest) if the current selection is invalid for this view
-                         // But we also need to handle the case where user restored a date from storage that IS valid.
-                         // The initialization of state handles the restore.
-                         // This effect handles "View Month Changed" or "Dates Changed".
-                         // If viewMonth changed and selectedDate is not in it, select latest?
-                         // Or keep selectedDate even if not visible? Usually heatmap requires selectedDate to be the base.
-                         // Let's stick to: if not in view, select latest of view.
                          setSelectedDate(availableKeyDates[availableKeyDates.length - 1]);
                      }
                 }
@@ -561,7 +666,6 @@
                 let historicalTotals = [];
                 let historicalRemainings = [];
                 
-                // Iterate back 12 weeks
                 for(let i=1; i<=12; i++) {
                     const pastDate = new Date(targetDate);
                     pastDate.setDate(pastDate.getDate() - (i * 7));
@@ -570,7 +674,6 @@
                     const endMs = startMs + (24 * 3600000);
                     const cutoffMs = startMs + (currentHourET * 3600000);
 
-                    // Valid window for history (12:00 cutoff for first/last day)
                     let validStart = startMs;
                     let validEnd = endMs;
                     if (dayIndex === 0) validStart = startMs + (12 * 3600000); 
@@ -581,7 +684,6 @@
                         return t >= validStart && t < validEnd;
                     });
                     
-                    // Posts so far in that past day (only if within valid window)
                     const soFarPosts = dayPosts.filter(p => {
                          const t = new Date(p.createdAt).getTime();
                          return t < cutoffMs; 
@@ -594,7 +696,6 @@
                     }
                 }
                 
-                // Helpers
                 const calcStats = (arr) => {
                     if (arr.length === 0) return { min:0, avg:0, max:0 };
                     const sorted = [...arr].sort((a,b)=>a-b);
@@ -1156,14 +1257,7 @@
                 return t;
             };
 
-            const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
-            const formatDateET = (date) => date.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' });
-            const formatWeekdayET = (date) => date.toLocaleDateString('zh-TW', { timeZone: 'America/New_York', weekday: 'short' });
-            
-            // Keeps for existing uses if any, but override for header
-            const formatTime = (date) => formatTimeET(date);
-            const formatDay = (date) => formatWeekdayET(date);
-
+            // Added logic for hoursSinceLast
             let hoursSinceLast = 0;
             const lastPost = posts.length > 0 ? posts[0] : null;
             const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
