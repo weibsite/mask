@@ -681,154 +681,151 @@
             const [activeTab, setActiveTab] = useState('cumulative');
             const [tooltip, setTooltip] = useState(null);
             const containerRef = useRef(null);
+            const [chartData, setChartData] = useState(null);
 
-            const chartData = useMemo(() => {
-                if (posts.length === 0) return null;
-                
-                // Helper: Get Posts by Hour (0-23)
-                const getHourlyStats = () => {
-                    const buckets = Array(24).fill(0);
-                    const daysCount = new Set(posts.map(p => new Date(p.createdAt).toDateString())).size;
-                    posts.forEach(p => {
-                        const h = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getHours();
-                        buckets[h]++;
-                    });
-                    return buckets.map((count, h) => ({ label: `${h}`, val: count / (daysCount || 1) }));
-                };
+            // Lazy Calculation Effect
+            useEffect(() => {
+                if (posts.length === 0) {
+                    setChartData(null);
+                    return;
+                }
 
-                // Helper: Get Posts by Day (Sun-Sat)
-                const getDailyStats = () => {
-                    const buckets = Array(7).fill(0);
-                    const days = ['日', '一', '二', '三', '四', '五', '六'];
-                    // Count unique weeks? Or just total count / weeks approx?
-                    // Let's do Avg per specific weekday.
-                    const weekdayCounts = Array(7).fill(0);
-                    posts.forEach(p => {
-                        const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getDay();
-                        buckets[d]++;
-                        weekdayCounts[d]++; // This is crude, better is strictly counting unique dates for that weekday
-                    });
-                    // Approximate normalization: Total 90 days ~ 12 weeks
-                    return buckets.map((count, i) => ({ label: days[i], val: count / 12 }));
-                };
-
-                // Helper: Hourly Probability ( >0 posts in hour)
-                const getHourlyProb = () => {
-                    const hourHits = Array(24).fill(0);
-                    const uniqueDays = new Set();
-                    posts.forEach(p => {
-                        const dateStr = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
-                        uniqueDays.add(dateStr);
-                    });
-                    const totalDays = uniqueDays.size;
-                    
-                    // We need to count how many days had at least 1 post in hour X
-                    for(let h=0; h<24; h++) {
-                        let daysWithPost = 0;
-                        uniqueDays.forEach(dayStr => {
-                            // Check if any post falls in this day & hour
-                            const hasPost = posts.some(p => {
-                                const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"}));
-                                return d.toLocaleDateString("en-US") === new Date(dayStr).toLocaleDateString("en-US") && d.getHours() === h;
+                // Defer calculation to let UI paint first (300ms delay)
+                const timer = setTimeout(() => {
+                    const calculateData = () => {
+                        // Helper: Get Posts by Hour (0-23)
+                        const getHourlyStats = () => {
+                            const buckets = Array(24).fill(0);
+                            const daysCount = new Set(posts.map(p => new Date(p.createdAt).toDateString())).size;
+                            posts.forEach(p => {
+                                const h = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getHours();
+                                buckets[h]++;
                             });
-                            if(hasPost) daysWithPost++;
-                        });
-                        hourHits[h] = (daysWithPost / totalDays) * 100;
-                    }
-                    return hourHits.map((prob, h) => ({ label: `${h}`, val: prob }));
-                };
+                            return buckets.map((count, h) => ({ label: `${h}`, val: count / (daysCount || 1) }));
+                        };
 
-                // Helper: Cumulative Comparison
-                // Needs to align with WeeklyHeatmap's "Active Window" (12:00 Tue -> 12:00 Tue)
-                // activeWindow prop provides: gridStartTimeMs, activeStartMs, activeEndMs
-                const getCumulativeData = () => {
-                    if (!activeWindow) return null;
-                    const { activeStartMs } = activeWindow; // Current cycle start
-                    
-                    // Series 1: Current (0 to 168 hours)
-                    const currentPoints = [];
-                    let runningTotal = 0;
-                    const nowMs = new Date().getTime();
-                    
-                    // Filter posts in current window, sort by time
-                    const currentPosts = posts.filter(p => {
-                        const t = new Date(p.createdAt).getTime();
-                        return t >= activeStartMs && t < activeStartMs + (7*24*3600000);
-                    }).sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+                        // Helper: Get Posts by Day (Sun-Sat)
+                        const getDailyStats = () => {
+                            const buckets = Array(7).fill(0);
+                            const days = ['日', '一', '二', '三', '四', '五', '六'];
+                            const weekdayCounts = Array(7).fill(0);
+                            posts.forEach(p => {
+                                const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getDay();
+                                buckets[d]++;
+                                weekdayCounts[d]++; 
+                            });
+                            return buckets.map((count, i) => ({ label: days[i], val: count / 12 }));
+                        };
 
-                    // Build points hour by hour or event based? Hour by hour is smoother for chart.
-                    for(let h=0; h<=168; h++) {
-                        const checkTime = activeStartMs + (h * 3600000);
-                        if (checkTime > nowMs) break; 
-                        // Count posts before checkTime
-                        const count = currentPosts.filter(p => new Date(p.createdAt).getTime() <= checkTime).length;
-                        currentPoints.push({ x: h, y: count });
-                        runningTotal = count;
-                    }
+                        // Helper: Hourly Probability ( >0 posts in hour)
+                        const getHourlyProb = () => {
+                            const hourHits = Array(24).fill(0);
+                            const uniqueDays = new Set();
+                            posts.forEach(p => {
+                                const dateStr = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
+                                uniqueDays.add(dateStr);
+                            });
+                            const totalDays = uniqueDays.size;
+                            
+                            for(let h=0; h<24; h++) {
+                                let daysWithPost = 0;
+                                uniqueDays.forEach(dayStr => {
+                                    const hasPost = posts.some(p => {
+                                        const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"}));
+                                        return d.toLocaleDateString("en-US") === new Date(dayStr).toLocaleDateString("en-US") && d.getHours() === h;
+                                    });
+                                    if(hasPost) daysWithPost++;
+                                });
+                                hourHits[h] = (daysWithPost / totalDays) * 100;
+                            }
+                            return hourHits.map((prob, h) => ({ label: `${h}`, val: prob }));
+                        };
 
-                    // Series 2: Projection (Dashed)
-                    const projPoints = [];
-                    if (currentPoints.length > 0) {
-                        const lastPt = currentPoints[currentPoints.length-1];
-                        const hoursGone = lastPt.x;
-                        const rate = hoursGone > 0 ? lastPt.y / hoursGone : 0;
-                        const remainingHours = 168 - hoursGone;
-                        const projEnd = lastPt.y + (rate * remainingHours);
-                        projPoints.push(lastPt);
-                        projPoints.push({ x: 168, y: projEnd });
-                    }
+                        // Helper: Cumulative Comparison
+                        const getCumulativeData = () => {
+                            if (!activeWindow) return null;
+                            const { activeStartMs } = activeWindow; 
+                            
+                            const currentPoints = [];
+                            let runningTotal = 0;
+                            const nowMs = new Date().getTime();
+                            
+                            const currentPosts = posts.filter(p => {
+                                const t = new Date(p.createdAt).getTime();
+                                return t >= activeStartMs && t < activeStartMs + (7*24*3600000);
+                            }).sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-                    // Series 3-6: Past 4 Weeks
-                    const pastLines = [];
-                    for(let w=1; w<=4; w++) {
-                        const start = activeStartMs - (w * 7 * 24 * 3600000);
-                        const end = start + (7*24*3600000);
-                        const pastP = posts.filter(p => {
-                            const t = new Date(p.createdAt).getTime();
-                            return t >= start && t < end;
-                        }); // Just count total is not enough, need cumulative
-                        
-                        const points = [];
-                        // Optimization: just check every 4 hours to save rendering
-                        for(let h=0; h<=168; h+=4) {
-                            const ct = start + (h * 3600000);
-                            const c = pastP.filter(p => new Date(p.createdAt).getTime() <= ct).length;
-                            points.push({ x: h, y: c });
-                        }
-                        pastLines.push({ label: `-${w}W`, points });
-                    }
+                            for(let h=0; h<=168; h++) {
+                                const checkTime = activeStartMs + (h * 3600000);
+                                if (checkTime > nowMs) break; 
+                                const count = currentPosts.filter(p => new Date(p.createdAt).getTime() <= checkTime).length;
+                                currentPoints.push({ x: h, y: count });
+                                runningTotal = count;
+                            }
 
-                    return { currentPoints, projPoints, pastLines };
-                };
+                            const projPoints = [];
+                            if (currentPoints.length > 0) {
+                                const lastPt = currentPoints[currentPoints.length-1];
+                                const hoursGone = lastPt.x;
+                                const rate = hoursGone > 0 ? lastPt.y / hoursGone : 0;
+                                const remainingHours = 168 - hoursGone;
+                                const projEnd = lastPt.y + (rate * remainingHours);
+                                projPoints.push(lastPt);
+                                projPoints.push({ x: 168, y: projEnd });
+                            }
 
-                // Helper: Moving Average (Trend)
-                const getTrendData = () => {
-                    // Simple Daily Count MA
-                    // Group by Date
-                    const dailyMap = {};
-                    posts.forEach(p => {
-                        const d = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
-                        dailyMap[d] = (dailyMap[d] || 0) + 1;
-                    });
-                    const dates = Object.keys(dailyMap).sort((a,b) => new Date(a) - new Date(b));
-                    // Calculate 7-day MA
-                    const maPoints = [];
-                    for(let i=0; i<dates.length; i++) {
-                        if (i < 6) continue;
-                        let sum = 0;
-                        for(let j=0; j<7; j++) sum += dailyMap[dates[i-j]];
-                        maPoints.push({ label: dates[i].split('/')[1] + '/' + dates[i].split('/')[2], val: sum/7 });
-                    }
-                    return maPoints;
-                };
+                            const pastLines = [];
+                            for(let w=1; w<=4; w++) {
+                                const start = activeStartMs - (w * 7 * 24 * 3600000);
+                                const end = start + (7*24*3600000);
+                                const pastP = posts.filter(p => {
+                                    const t = new Date(p.createdAt).getTime();
+                                    return t >= start && t < end;
+                                }); 
+                                
+                                const points = [];
+                                for(let h=0; h<=168; h+=4) {
+                                    const ct = start + (h * 3600000);
+                                    const c = pastP.filter(p => new Date(p.createdAt).getTime() <= ct).length;
+                                    points.push({ x: h, y: c });
+                                }
+                                pastLines.push({ label: `-${w}W`, points });
+                            }
 
-                return {
-                    cumulative: getCumulativeData(),
-                    hourly: getHourlyStats(),
-                    daily: getDailyStats(),
-                    prob: getHourlyProb(),
-                    trend: getTrendData()
-                };
+                            return { currentPoints, projPoints, pastLines };
+                        };
+
+                        // Helper: Moving Average (Trend)
+                        const getTrendData = () => {
+                            const dailyMap = {};
+                            posts.forEach(p => {
+                                const d = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
+                                dailyMap[d] = (dailyMap[d] || 0) + 1;
+                            });
+                            const dates = Object.keys(dailyMap).sort((a,b) => new Date(a) - new Date(b));
+                            const maPoints = [];
+                            for(let i=0; i<dates.length; i++) {
+                                if (i < 6) continue;
+                                let sum = 0;
+                                for(let j=0; j<7; j++) sum += dailyMap[dates[i-j]];
+                                maPoints.push({ label: dates[i].split('/')[1] + '/' + dates[i].split('/')[2], val: sum/7 });
+                            }
+                            return maPoints;
+                        };
+
+                        return {
+                            cumulative: getCumulativeData(),
+                            hourly: getHourlyStats(),
+                            daily: getDailyStats(),
+                            prob: getHourlyProb(),
+                            trend: getTrendData()
+                        };
+                    };
+
+                    setChartData(calculateData());
+                }, 300);
+
+                return () => clearTimeout(timer);
             }, [posts, activeWindow]);
 
             const handleTouchMove = (e, type) => {
@@ -868,7 +865,12 @@
             };
 
             const renderChart = () => {
-                if (!chartData) return <div className="text-gray-500 text-center py-10">Loading Data...</div>;
+                if (!chartData) return (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                        <RefreshCw className="w-6 h-6 animate-spin mb-2 text-sky-500/50" />
+                        <span className="text-[10px] animate-pulse">分析圖表運算中...</span>
+                    </div>
+                );
                 const h = 150;
                 
                 if (activeTab === 'cumulative' && chartData.cumulative) {
@@ -1233,7 +1235,7 @@
             useEffect(() => {
                 addLog("System Init...");
                 fetchSpecialData();
-                const interval = setInterval(fetchSpecialData, 1000); 
+                const interval = setInterval(fetchSpecialData, 5000); 
                 return () => clearInterval(interval);
             }, [fetchSpecialData]);
 
