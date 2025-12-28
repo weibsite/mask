@@ -136,6 +136,21 @@
             font-weight: bold;
             text-shadow: 0 0 2px rgba(0,0,0,0.5);
         }
+        /* Chart Tooltip */
+        .chart-tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.9);
+            border: 1px solid #333;
+            padding: 4px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 10px;
+            color: white;
+            z-index: 50;
+            transform: translate(-50%, -100%);
+            margin-top: -10px;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -171,12 +186,165 @@
         const XCircle = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></g>} />;
         const Calendar = (props) => <IconBase {...props} path={<g><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></g>} />;
 
+        // --- Restored Components (Fixing ReferenceError) ---
+        const SilenceProbBadge = ({ label, prob }) => {
+            const p = parseInt(prob);
+            let color = "text-gray-500";
+            if (p > 70) color = "text-emerald-400 font-bold";
+            else if (p > 40) color = "text-sky-400";
+            return (
+                <div className="flex flex-col items-center bg-gray-900/40 rounded p-1 border border-gray-800/50">
+                    <span className="text-[9px] text-gray-500">{label}</span>
+                    <span className={`text-xs font-mono ${color}`}>{prob}%</span>
+                </div>
+            );
+        };
+
+        const RateRow = ({ label, data, hours, remainingHours, currentTotal, totalPosts, onDetailClick }) => {
+            if (!data) return null;
+            const ratioNum = parseInt(data.ratio);
+            const isHigh = ratioNum >= 100;
+            const currentSpeed = (parseFloat(data.current) / hours).toFixed(1);
+            const historyAvgSpeed = (parseFloat(data.avg) / hours);
+            let speedColorClass = "text-gray-500"; 
+            const speedDiff = parseFloat(currentSpeed) - historyAvgSpeed;
+            if (speedDiff > 0) {
+                if (parseFloat(currentSpeed) > historyAvgSpeed * 1.2) speedColorClass = "text-red-500 font-bold"; 
+                else speedColorClass = "text-orange-400"; 
+            } else if (speedDiff <= 0) { speedColorClass = "text-emerald-500"; }
+            const additional = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours) : 0;
+            const totalProjected = (typeof currentTotal === 'number' ? currentTotal : 0) + additional;
+            const baseTotal = typeof currentTotal === 'number' ? currentTotal : 0;
+
+            return (
+                <div className="py-3 border-b border-gray-800 last:border-0">
+                    <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
+                        <div className="flex items-center space-x-2">
+                            <div className="text-[10px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="最新發文數 + (目前速度 * 剩餘時數)">
+                                <span className="text-gray-500 mr-1.5 font-mono">{data.pos.toFixed(0)}%</span>
+                                <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
+                                {totalProjected.toFixed(1)}
+                            </div>
+                            <div className={`text-[10px] font-mono bg-gray-900 px-1 rounded border border-gray-800 ${speedColorClass}`}>
+                                {currentSpeed}/h
+                            </div>
+                            <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
+                        </div>
+                    </div>
+                    
+                    <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
+                        <div className="flex flex-col items-center clickable-stat hover:text-emerald-400" onClick={() => onDetailClick({label, data, hours, type: 'min'})}>
+                            <span>Min: {baseTotal + data.min} <span className="text-[9px] text-gray-600">({data.minFreq}%)</span></span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio}%</span>
+                            <span className="text-gray-400 clickable-stat hover:text-sky-400" onClick={() => onDetailClick({label, data, hours, type: 'avg'})}>
+                                Avg: {(baseTotal + parseFloat(data.avg)).toFixed(1)}
+                            </span>
+                        </div>
+                        <div className="flex flex-col items-center clickable-stat hover:text-red-400" onClick={() => onDetailClick({label, data, hours, type: 'max'})}>
+                            <span>Max: {baseTotal + data.max} <span className="text-[9px] text-gray-600">({data.maxFreq}%)</span></span>
+                        </div>
+                    </div>
+                    <div className="gauge-track w-full mt-1">
+                        <div className="gauge-fill" style={{width: `${data.pos}%`}}></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const HistoryCompareRow = ({ label, data }) => {
+            if (!data) return null;
+            const ratioNum = parseInt(data.ratio7d);
+            const isHigh = ratioNum >= 100;
+            return (
+                <div className="py-2 border-b border-gray-800 last:border-0">
+                    <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
+                        <span className="text-sm text-sky-400 font-bold w-12">{label}</span>
+                        
+                        <div className="flex flex-col items-center leading-none">
+                            <span className="text-[10px] text-gray-400 font-mono">7D Avg: {data.avg7d}</span>
+                            <span className={`text-[9px] font-bold mt-0.5 ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
+                                {isHigh ? '>' : '<'} {data.ratio7d}%
+                            </span>
+                        </div>
+
+                        <span className="text-base text-white font-mono bg-gray-800 px-2 rounded w-10 text-center">{data.current}</span>
+                    </div>
+                    <div className="flex space-x-2 text-center pb-1 justify-between">
+                        {data.history.map((val, idx) => (
+                            <div key={idx} className="flex-1 flex flex-col items-center bg-gray-900/50 rounded py-1">
+                                <span className="text-[8px] text-gray-500">-{idx+1}d</span>
+                                <span className={`text-[10px] font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>{val}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const StatsDetailModal = ({ detail, onClose }) => {
+            if (!detail) return null;
+            const { label, data, hours } = detail;
+            const formatTimeRange = (startTs, h) => {
+                if (!startTs) return "N/A";
+                const startDate = new Date(startTs);
+                const endDate = new Date(startTs + h * 3600000);
+                const dateStr = startDate.toLocaleDateString('zh-TW', {month:'numeric', day:'numeric', timeZone: 'America/New_York'});
+                const startStr = startDate.toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
+                return `${dateStr} ${startStr}`;
+            };
+
+            return (
+                <div className="modal-backdrop" onClick={onClose}>
+                    <div className="bg-[#111] border border-gray-700 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="bg-gray-900 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
+                            <div className="flex items-center space-x-2">
+                                <BarChart2 className="w-5 h-5 text-sky-500" />
+                                <h3 className="text-white font-bold text-lg">{label} 區間數據詳情</h3>
+                            </div>
+                            <button onClick={onClose} className="text-gray-400 hover:text-white"><XCircle className="w-6 h-6" /></button>
+                        </div>
+                        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                            <div className="text-xs text-gray-500 text-center mb-2">基於過去 90 天內，共 {data.samples.toLocaleString()} 個樣本</div>
+                            <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-emerald-500 font-bold flex items-center"><ChevronDown className="w-4 h-4 mr-1"/>歷史最低 (MIN)</span>
+                                    <span className="text-2xl font-mono font-bold text-white">{data.min} <span className="text-xs text-gray-500">篇</span></span>
+                                </div>
+                                <div className="text-[11px] text-gray-400 space-y-1">
+                                    <div className="flex justify-between"><span>發生時間:</span><span className="text-emerald-400 font-mono">{formatTimeRange(data.minTime, hours)}</span></div>
+                                    <div className="flex justify-between"><span>出現頻率:</span><span className="text-white font-mono">{data.minFreq}%</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-sky-500 font-bold flex items-center"><Activity className="w-4 h-4 mr-1"/>歷史平均 (AVG)</span>
+                                    <span className="text-2xl font-mono font-bold text-white">{data.avg} <span className="text-xs text-gray-500">篇</span></span>
+                                </div>
+                            </div>
+                            <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-red-500 font-bold flex items-center"><ChevronUp className="w-4 h-4 mr-1"/>歷史最高 (MAX)</span>
+                                    <span className="text-2xl font-mono font-bold text-white">{data.max} <span className="text-xs text-gray-500">篇</span></span>
+                                </div>
+                                <div className="text-[11px] text-gray-400 space-y-1">
+                                    <div className="flex justify-between"><span>發生時間:</span><span className="text-red-400 font-mono">{formatTimeRange(data.maxTime, hours)}</span></div>
+                                    <div className="flex justify-between"><span>出現頻率:</span><span className="text-white font-mono">{data.maxFreq}%</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- Weekly Heatmap Component ---
         const WeeklyHeatmap = ({ posts, liveCount }) => {
             const [selectedDate, setSelectedDate] = useState(new Date());
             const [viewMonth, setViewMonth] = useState(new Date());
 
-            // Helper: Get Tuesdays and Fridays in a month
             const getKeyDates = (date) => {
                 const year = date.getFullYear();
                 const month = date.getMonth();
@@ -184,7 +352,7 @@
                 const d = new Date(year, month, 1);
                 while (d.getMonth() === month) {
                     const day = d.getDay();
-                    if (day === 2 || day === 5) { // Tuesday (2) or Friday (5)
+                    if (day === 2 || day === 5) { 
                         dates.push(new Date(d));
                     }
                     d.setDate(d.getDate() + 1);
@@ -193,9 +361,6 @@
             };
 
             const keyDates = useMemo(() => getKeyDates(viewMonth), [viewMonth]);
-            const today = useMemo(() => new Date(), []);
-
-            // Helper to check if a date is strictly in the future (comparing YYYY-MM-DD)
             const isFutureDate = (d) => {
                 const check = new Date(d);
                 const now = new Date();
@@ -203,13 +368,8 @@
                 now.setHours(0,0,0,0);
                 return check > now;
             };
+            const availableKeyDates = useMemo(() => keyDates.filter(d => !isFutureDate(d)), [keyDates]);
 
-            // Filter keyDates to hide future dates
-            const availableKeyDates = useMemo(() => {
-                return keyDates.filter(d => !isFutureDate(d));
-            }, [keyDates]);
-
-            // Auto-Select Logic
             useEffect(() => {
                 if (availableKeyDates.length > 0) {
                      setSelectedDate(availableKeyDates[availableKeyDates.length - 1]);
@@ -222,33 +382,23 @@
                 setViewMonth(newDate);
             };
 
-            // Active Window Calculation (12:00 to 12:00)
             const activeWindow = useMemo(() => {
                 if (!selectedDate) return null;
                 const year = selectedDate.getFullYear();
                 const month = selectedDate.getMonth();
                 const date = selectedDate.getDate();
                 const etOffset = 5; 
-                
-                // Grid starts at 00:00 ET of start day (to render the full column)
                 const gridStartTimeMs = Date.UTC(year, month, date, etOffset, 0, 0); 
-                
-                // Active period: Start Day 12:00 ET -> End Day (+7) 12:00 ET
                 const activeStartMs = gridStartTimeMs + (12 * 3600000); 
                 const activeEndMs = activeStartMs + (7 * 24 * 3600000); 
-
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
             }, [selectedDate]);
 
-
-            // Calculate Historical Stats for a specific column
-            // Now accepts dayIndex to handle 12:00 cutoffs correctly
+            // Enhanced Stats Calculation: Min, Avg, Max
             const getHistoricalStats = (targetDate, currentVal, dayIndex) => {
-                if (!targetDate || posts.length === 0) return { avgTotal: 0, avgSoFar: 0, projected: 0, isToday: false, isFuture: false };
+                if (!targetDate || posts.length === 0) return { min:0, avg:0, max:0, isToday: false, isFuture: false };
 
                 const nowET = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
-                
-                // Compare Date Objects (YYYY-MM-DD) for ET
                 const targetET = new Date(targetDate.toLocaleString("en-US", {timeZone: "America/New_York"}));
                 targetET.setHours(0,0,0,0);
                 const todayET = new Date(nowET);
@@ -256,79 +406,78 @@
 
                 const isToday = targetET.getTime() === todayET.getTime();
                 const isFuture = targetET.getTime() > todayET.getTime();
-
-                // If today, we look up to current hour
                 const currentHourET = nowET.getHours();
                 
-                let sumTotal = 0;
-                let sumSoFar = 0;
-                let count = 0;
+                let historicalTotals = [];
+                let historicalRemainings = [];
                 
                 // Iterate back 12 weeks
                 for(let i=1; i<=12; i++) {
                     const pastDate = new Date(targetDate);
                     pastDate.setDate(pastDate.getDate() - (i * 7));
                     
-                    const startMs = Date.UTC(pastDate.getFullYear(), pastDate.getMonth(), pastDate.getDate(), 5, 0, 0); // 00:00 ET
-                    const endMs = startMs + (24 * 3600000); // Full Day
-                    const cutoffMs = startMs + (currentHourET * 3600000); // Up to current hour
+                    const startMs = Date.UTC(pastDate.getFullYear(), pastDate.getMonth(), pastDate.getDate(), 5, 0, 0); 
+                    const endMs = startMs + (24 * 3600000);
+                    const cutoffMs = startMs + (currentHourET * 3600000);
 
-                    // Apply Cycle Filter logic for history
+                    // Valid window for history (12:00 cutoff for first/last day)
                     let validStart = startMs;
                     let validEnd = endMs;
-
-                    if (dayIndex === 0) {
-                        // First day: Valid only >= 12:00
-                        validStart = startMs + (12 * 3600000); 
-                    } else if (dayIndex === 7) {
-                        // Last day: Valid only < 12:00
-                        validEnd = startMs + (12 * 3600000); 
-                    }
-                    // Middle days (1-6): Valid all day
+                    if (dayIndex === 0) validStart = startMs + (12 * 3600000); 
+                    else if (dayIndex === 7) validEnd = startMs + (12 * 3600000); 
 
                     const dayPosts = posts.filter(p => {
                         const t = new Date(p.createdAt).getTime();
                         return t >= validStart && t < validEnd;
                     });
                     
+                    // Posts so far in that past day (only if within valid window)
                     const soFarPosts = dayPosts.filter(p => {
                          const t = new Date(p.createdAt).getTime();
-                         return t < cutoffMs;
+                         return t < cutoffMs; 
                     });
 
                     const oldestPost = posts[posts.length-1];
                     if (oldestPost && pastDate > new Date(oldestPost.createdAt)) {
-                        sumTotal += dayPosts.length;
-                        sumSoFar += soFarPosts.length;
-                        count++;
+                        historicalTotals.push(dayPosts.length);
+                        historicalRemainings.push(dayPosts.length - soFarPosts.length);
                     }
                 }
                 
-                const avgTotal = count > 0 ? (sumTotal / count) : 0;
-                const avgSoFar = count > 0 ? (sumSoFar / count) : 0;
-                
-                // Projection Logic for Today: (Current / AvgSoFar) * AvgTotal
-                let projected = 0;
-                if (isToday) {
-                    if (avgSoFar > 0.1) {
-                        projected = (currentVal / avgSoFar) * avgTotal;
-                    } else {
-                        projected = currentVal + (avgTotal - avgSoFar); 
-                    }
-                } else if (isFuture) {
-                    projected = avgTotal;
+                // Helpers
+                const calcStats = (arr) => {
+                    if (arr.length === 0) return { min:0, avg:0, max:0 };
+                    const sorted = [...arr].sort((a,b)=>a-b);
+                    const sum = sorted.reduce((a,b)=>a+b,0);
+                    return {
+                        min: sorted[0],
+                        max: sorted[sorted.length-1],
+                        avg: sum / sorted.length
+                    };
                 }
 
-                return { avgTotal, avgSoFar, projected, isToday, isFuture };
+                const totalStats = calcStats(historicalTotals);
+                const remainStats = calcStats(historicalRemainings);
+
+                let res = { min: 0, avg: 0, max: 0, isToday, isFuture };
+
+                if (isToday) {
+                    res.min = currentVal + remainStats.min;
+                    res.avg = currentVal + remainStats.avg;
+                    res.max = currentVal + remainStats.max;
+                } else if (isFuture) {
+                    res.min = totalStats.min;
+                    res.avg = totalStats.avg;
+                    res.max = totalStats.max;
+                }
+
+                return res;
             };
 
-
-            // Build Grid Data
             const gridData = useMemo(() => {
                 if (!activeWindow) return null;
                 const { gridStartTimeMs, activeStartMs, activeEndMs } = activeWindow;
                 const oneDay = 24 * 60 * 60 * 1000;
-                
                 const grid = Array(24).fill(0).map(() => Array(8).fill(0));
                 
                 posts.forEach(p => {
@@ -343,72 +492,51 @@
                         }
                     }
                 });
-                
                 const headers = [];
                 for(let i=0; i<8; i++) {
                     headers.push(new Date(gridStartTimeMs + i * oneDay));
                 }
-                
                 return { grid, headers, activeStartMs, activeEndMs };
-
             }, [activeWindow, posts]);
 
             const getCellClass = (val, cellTimeMs, activeStartMs, activeEndMs) => {
-                // Strict Cycle Check: Black out if outside 12:00-12:00 window
-                if (cellTimeMs < activeStartMs || cellTimeMs >= activeEndMs) {
-                    return "bg-[#111] border border-[#222] text-[#333]"; // "Blackout" style
-                }
-
+                if (cellTimeMs < activeStartMs || cellTimeMs >= activeEndMs) return "bg-[#111] border border-[#222] text-[#333]";
                 if (val === 0) return "heat-cell-inactive text-gray-700";
                 if (val >= 10) return "heat-cell-hot";
                 return "bg-emerald-800 text-emerald-100";
             };
 
-            const formatHeaderDate = (d) => {
-                return d.toLocaleDateString('zh-TW', {
-                    timeZone: 'America/New_York',
-                    weekday: 'short',
-                    day: 'numeric'
-                }).replace(/(\d+)/, '\n$1');
-            };
-
-            // Calculate Grand Total logic
             const summaryData = useMemo(() => {
-                if (!gridData) return { totalActual: 0, totalProjected: 0 };
+                if (!gridData) return { totalActual: 0, proj: {min:0, avg:0, max:0} };
                 
                 let totalActual = 0;
-                let totalProjected = 0;
+                let projMin = 0, projAvg = 0, projMax = 0;
 
                 gridData.headers.forEach((d, dIdx) => {
                     const isFuture = isFutureDate(d);
-                    
-                    // Sum ONLY visible/active cells for this column
                     const colSum = gridData.grid.reduce((acc, row, hIdx) => {
                          const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                         // Strict check for statistics too
-                         if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
-                             return acc + row[dIdx];
-                         }
+                         if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
                          return acc;
                     }, 0);
 
-                    // If future date, actual is 0 (even if grid has stale data)
                     const validActual = isFuture ? 0 : colSum;
                     totalActual += validActual;
 
-                    // Projection Logic
-                    const { projected, isToday, isFuture: isFutStats } = getHistoricalStats(d, validActual, dIdx);
+                    const stats = getHistoricalStats(d, validActual, dIdx);
                     
-                    if (isFutStats) {
-                        totalProjected += projected;
-                    } else if (isToday) {
-                        totalProjected += projected;
+                    if (stats.isFuture || stats.isToday) {
+                        projMin += stats.min;
+                        projAvg += stats.avg;
+                        projMax += stats.max;
                     } else {
-                        totalProjected += validActual;
+                        projMin += validActual;
+                        projAvg += validActual;
+                        projMax += validActual;
                     }
                 });
                 
-                return { totalActual, totalProjected };
+                return { totalActual, proj: {min: projMin, avg: projAvg, max: projMax} };
             }, [gridData, posts]); 
 
             const tuesdayDates = availableKeyDates.filter(d => d.getDay() === 2);
@@ -423,30 +551,17 @@
                         </div>
                         <div className="flex items-center bg-gray-900 rounded-lg p-1 border border-gray-700">
                             <button onClick={() => changeMonth(-1)} className="p-1 hover:text-white text-gray-500"><ChevronLeft className="w-4 h-4"/></button>
-                            <span className="mx-2 text-xs font-mono font-bold w-16 text-center">
-                                {viewMonth.getFullYear()}/{viewMonth.getMonth()+1}
-                            </span>
+                            <span className="mx-2 text-xs font-mono font-bold w-16 text-center">{viewMonth.getFullYear()}/{viewMonth.getMonth()+1}</span>
                             <button onClick={() => changeMonth(1)} className="p-1 hover:text-white text-gray-500"><ChevronRight className="w-4 h-4"/></button>
                         </div>
                     </div>
                     
-                    {/* Date Selector Pills */}
                     <div className="flex flex-col gap-2 mb-4 bg-gray-900/30 p-2 rounded-lg border border-gray-800">
                         <div className="flex items-center space-x-2">
                             <span className="text-[9px] text-gray-500 w-6">Tue</span>
                             <div className="flex flex-wrap gap-2">
                                 {tuesdayDates.map(d => (
-                                    <button 
-                                        key={d.toISOString()}
-                                        onClick={() => setSelectedDate(d)}
-                                        className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${
-                                            selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth()
-                                            ? "bg-sky-600 text-white border-sky-400 font-bold shadow-lg shadow-sky-900/50" 
-                                            : "bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500"
-                                        }`}
-                                    >
-                                        {d.getDate()}
-                                    </button>
+                                    <button key={d.toISOString()} onClick={() => setSelectedDate(d)} className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-sky-600 text-white border-sky-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}>{d.getDate()}</button>
                                 ))}
                             </div>
                         </div>
@@ -454,147 +569,389 @@
                             <span className="text-[9px] text-gray-500 w-6">Fri</span>
                             <div className="flex flex-wrap gap-2">
                                 {fridayDates.map(d => (
-                                    <button 
-                                        key={d.toISOString()}
-                                        onClick={() => setSelectedDate(d)}
-                                        className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${
-                                            selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth()
-                                            ? "bg-purple-600 text-white border-purple-400 font-bold shadow-lg shadow-purple-900/50" 
-                                            : "bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500"
-                                        }`}
-                                    >
-                                        {d.getDate()}
-                                    </button>
+                                    <button key={d.toISOString()} onClick={() => setSelectedDate(d)} className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-purple-600 text-white border-purple-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}>{d.getDate()}</button>
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    {/* Heatmap Grid */}
                     {gridData && (
                         <div className="overflow-x-auto">
                              <div className="min-w-[300px]">
-                                {/* Header Row */}
                                 <div className="flex ml-8 mb-1">
                                     {gridData.headers.map((d, i) => (
                                         <div key={i} className="flex-1 text-center text-[9px] text-gray-400 leading-tight whitespace-pre">
-                                            {formatHeaderDate(d)}
+                                            {d.toLocaleDateString('zh-TW', {timeZone:'America/New_York', weekday:'short', day:'numeric'}).replace(/(\d+)/, '\n$1')}
                                         </div>
                                     ))}
                                 </div>
-                                {/* Rows */}
                                 {gridData.grid.map((row, hIdx) => (
                                     <div key={hIdx} className="flex h-[15px] mb-[1px]">
-                                        <div className="w-8 text-[9px] text-gray-600 text-right pr-2 leading-[15px] font-mono flex-shrink-0">
-                                            {hIdx.toString().padStart(2, '0')}:00
-                                        </div>
+                                        <div className="w-8 text-[9px] text-gray-600 text-right pr-2 leading-[15px] font-mono flex-shrink-0">{hIdx.toString().padStart(2, '0')}:00</div>
                                         {row.map((val, dIdx) => {
                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                            const targetDate = gridData.headers[dIdx];
-                                            const isFuture = isFutureDate(targetDate);
-                                            
-                                            // 1. If strict future day, value is 0.
-                                            // 2. If valid time but outside cycle, getCellClass will hide it.
-                                            
+                                            const isFuture = isFutureDate(gridData.headers[dIdx]);
                                             const displayVal = isFuture ? 0 : val;
                                             const isActive = cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs;
-
                                             return (
-                                                <div 
-                                                    key={dIdx} 
-                                                    className={`flex-1 mx-[1px] rounded-sm heat-cell ${getCellClass(displayVal, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs)}`}
-                                                >
+                                                <div key={dIdx} className={`flex-1 mx-[1px] rounded-sm heat-cell ${getCellClass(displayVal, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs)}`}>
                                                     {displayVal > 0 && isActive ? displayVal : ''}
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 ))}
-                                
-                                {/* Line 2 (Summary Line 1): Actual Total */}
                                 <div className="flex h-6 mt-1 border-t border-gray-800 pt-1">
-                                     <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">
-                                        Total
-                                     </div>
+                                     <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">Total</div>
                                      {gridData.grid[0].map((_, dIdx) => {
-                                         const targetDate = gridData.headers[dIdx];
-                                         const isFuture = isFutureDate(targetDate);
-                                         
-                                         // Sum ONLY visible/active cells for this column
+                                         const isFuture = isFutureDate(gridData.headers[dIdx]);
                                          const colSum = isFuture ? 0 : gridData.grid.reduce((acc, row, hIdx) => {
                                              const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
-                                                 return acc + row[dIdx];
-                                             }
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
                                              return acc;
                                          }, 0);
-                                         
-                                         return (
-                                             <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">
-                                                 {isFuture ? '-' : colSum}
-                                             </div>
-                                         )
+                                         return <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">{isFuture ? '-' : colSum}</div>
                                      })}
                                 </div>
-
-                                {/* Line 3: Projection / Avg */}
+                                {/* Proj. Row with Min/Avg/Max */}
                                 <div className="flex mt-1 pb-1">
-                                     <div className="w-8 text-[9px] text-gray-500 text-right pr-2 leading-[14px]">
-                                        Proj.
-                                     </div>
+                                     <div className="w-8 text-[9px] text-gray-500 text-right pr-2 leading-[14px]">Proj.</div>
                                      {gridData.grid[0].map((_, dIdx) => {
-                                         // Use the same filtered colSum logic
                                          const targetDate = gridData.headers[dIdx];
                                          const isFuture = isFutureDate(targetDate);
                                          const colSum = isFuture ? 0 : gridData.grid.reduce((acc, row, hIdx) => {
                                              const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
-                                                 return acc + row[dIdx];
-                                             }
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
                                              return acc;
                                          }, 0);
+                                         const stats = getHistoricalStats(targetDate, colSum, dIdx);
+                                         
+                                         if (!stats.isToday && !stats.isFuture) return <div key={dIdx} className="flex-1 text-center text-[9px] text-gray-600">-</div>;
 
-                                         const { projected, isToday, isFuture: isFutStats, avgTotal } = getHistoricalStats(targetDate, colSum, dIdx);
-                                         
-                                         let content = "";
-                                         let color = "text-gray-600";
-                                         
-                                         if (isToday) {
-                                            content = projected.toFixed(1);
-                                            color = "text-emerald-400 font-bold";
-                                         } else if (isFutStats) {
-                                            content = avgTotal.toFixed(1);
-                                            color = "text-gray-500";
-                                         } else {
-                                            // Past
-                                            content = "-"; 
-                                         }
-                                         
                                          return (
-                                             <div key={dIdx} className="flex-1 flex flex-col items-center">
-                                                 <span className={`text-[9px] font-mono leading-[14px] ${color}`}>
-                                                     {content}
-                                                 </span>
+                                             <div key={dIdx} className="flex-1 flex flex-col items-center justify-center leading-none text-[8px] font-mono">
+                                                 <span className="text-red-400">{stats.max.toFixed(0)}</span>
+                                                 <span className="text-emerald-400">{stats.avg.toFixed(0)}</span>
+                                                 <span className="text-gray-500">{stats.min.toFixed(0)}</span>
                                              </div>
                                          )
                                      })}
                                 </div>
-
-                                {/* Line 4: Grand Summaries (Right Aligned) */}
-                                <div className="flex justify-end mt-2 pt-2 border-t border-gray-800/50 space-x-4 pr-1">
-                                    <div className="flex flex-col items-end">
-                                        <span className="text-[9px] text-gray-500">總預估值 (Total Proj)</span>
-                                        <span className="text-sm font-mono font-bold text-emerald-400">{summaryData.totalProjected.toFixed(1)}</span>
+                                <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-800/50 px-1">
+                                    <div className="flex items-center space-x-2">
+                                        <div className="text-[9px] text-gray-500 text-right">總預估值 (Total Proj) <br/><span className="text-[8px]">(Min/Avg/Max)</span></div>
+                                        <div className="flex flex-col text-right font-mono font-bold text-xs">
+                                            <span className="text-red-400">{summaryData.proj.max.toFixed(0)}</span>
+                                            <span className="text-emerald-400">{summaryData.proj.avg.toFixed(0)}</span>
+                                            <span className="text-gray-500">{summaryData.proj.min.toFixed(0)}</span>
+                                        </div>
                                     </div>
                                     <div className="flex flex-col items-end">
-                                        <span className="text-[9px] text-gray-500">目前總數 (Total Actual)</span>
+                                        <span className="text-[9px] text-gray-500">目前總數 (Actual)</span>
                                         <span className="text-sm font-mono font-bold text-sky-400">{summaryData.totalActual}</span>
                                     </div>
                                 </div>
-
                              </div>
                         </div>
                     )}
+                </div>
+            );
+        };
+
+        const ChartSection = ({ posts, activeWindow }) => {
+            const [activeTab, setActiveTab] = useState('cumulative');
+            const [tooltip, setTooltip] = useState(null);
+            const containerRef = useRef(null);
+
+            const chartData = useMemo(() => {
+                if (posts.length === 0) return null;
+                
+                // Helper: Get Posts by Hour (0-23)
+                const getHourlyStats = () => {
+                    const buckets = Array(24).fill(0);
+                    const daysCount = new Set(posts.map(p => new Date(p.createdAt).toDateString())).size;
+                    posts.forEach(p => {
+                        const h = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getHours();
+                        buckets[h]++;
+                    });
+                    return buckets.map((count, h) => ({ label: `${h}`, val: count / (daysCount || 1) }));
+                };
+
+                // Helper: Get Posts by Day (Sun-Sat)
+                const getDailyStats = () => {
+                    const buckets = Array(7).fill(0);
+                    const days = ['日', '一', '二', '三', '四', '五', '六'];
+                    // Count unique weeks? Or just total count / weeks approx?
+                    // Let's do Avg per specific weekday.
+                    const weekdayCounts = Array(7).fill(0);
+                    posts.forEach(p => {
+                        const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"})).getDay();
+                        buckets[d]++;
+                        weekdayCounts[d]++; // This is crude, better is strictly counting unique dates for that weekday
+                    });
+                    // Approximate normalization: Total 90 days ~ 12 weeks
+                    return buckets.map((count, i) => ({ label: days[i], val: count / 12 }));
+                };
+
+                // Helper: Hourly Probability ( >0 posts in hour)
+                const getHourlyProb = () => {
+                    const hourHits = Array(24).fill(0);
+                    const uniqueDays = new Set();
+                    posts.forEach(p => {
+                        const dateStr = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
+                        uniqueDays.add(dateStr);
+                    });
+                    const totalDays = uniqueDays.size;
+                    
+                    // We need to count how many days had at least 1 post in hour X
+                    for(let h=0; h<24; h++) {
+                        let daysWithPost = 0;
+                        uniqueDays.forEach(dayStr => {
+                            // Check if any post falls in this day & hour
+                            const hasPost = posts.some(p => {
+                                const d = new Date(new Date(p.createdAt).toLocaleString("en-US", {timeZone: "America/New_York"}));
+                                return d.toLocaleDateString("en-US") === new Date(dayStr).toLocaleDateString("en-US") && d.getHours() === h;
+                            });
+                            if(hasPost) daysWithPost++;
+                        });
+                        hourHits[h] = (daysWithPost / totalDays) * 100;
+                    }
+                    return hourHits.map((prob, h) => ({ label: `${h}`, val: prob }));
+                };
+
+                // Helper: Cumulative Comparison
+                // Needs to align with WeeklyHeatmap's "Active Window" (12:00 Tue -> 12:00 Tue)
+                // activeWindow prop provides: gridStartTimeMs, activeStartMs, activeEndMs
+                const getCumulativeData = () => {
+                    if (!activeWindow) return null;
+                    const { activeStartMs } = activeWindow; // Current cycle start
+                    
+                    // Series 1: Current (0 to 168 hours)
+                    const currentPoints = [];
+                    let runningTotal = 0;
+                    const nowMs = new Date().getTime();
+                    
+                    // Filter posts in current window, sort by time
+                    const currentPosts = posts.filter(p => {
+                        const t = new Date(p.createdAt).getTime();
+                        return t >= activeStartMs && t < activeStartMs + (7*24*3600000);
+                    }).sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+                    // Build points hour by hour or event based? Hour by hour is smoother for chart.
+                    for(let h=0; h<=168; h++) {
+                        const checkTime = activeStartMs + (h * 3600000);
+                        if (checkTime > nowMs) break; 
+                        // Count posts before checkTime
+                        const count = currentPosts.filter(p => new Date(p.createdAt).getTime() <= checkTime).length;
+                        currentPoints.push({ x: h, y: count });
+                        runningTotal = count;
+                    }
+
+                    // Series 2: Projection (Dashed)
+                    const projPoints = [];
+                    if (currentPoints.length > 0) {
+                        const lastPt = currentPoints[currentPoints.length-1];
+                        const hoursGone = lastPt.x;
+                        const rate = hoursGone > 0 ? lastPt.y / hoursGone : 0;
+                        const remainingHours = 168 - hoursGone;
+                        const projEnd = lastPt.y + (rate * remainingHours);
+                        projPoints.push(lastPt);
+                        projPoints.push({ x: 168, y: projEnd });
+                    }
+
+                    // Series 3-6: Past 4 Weeks
+                    const pastLines = [];
+                    for(let w=1; w<=4; w++) {
+                        const start = activeStartMs - (w * 7 * 24 * 3600000);
+                        const end = start + (7*24*3600000);
+                        const pastP = posts.filter(p => {
+                            const t = new Date(p.createdAt).getTime();
+                            return t >= start && t < end;
+                        }); // Just count total is not enough, need cumulative
+                        
+                        const points = [];
+                        // Optimization: just check every 4 hours to save rendering
+                        for(let h=0; h<=168; h+=4) {
+                            const ct = start + (h * 3600000);
+                            const c = pastP.filter(p => new Date(p.createdAt).getTime() <= ct).length;
+                            points.push({ x: h, y: c });
+                        }
+                        pastLines.push({ label: `-${w}W`, points });
+                    }
+
+                    return { currentPoints, projPoints, pastLines };
+                };
+
+                // Helper: Moving Average (Trend)
+                const getTrendData = () => {
+                    // Simple Daily Count MA
+                    // Group by Date
+                    const dailyMap = {};
+                    posts.forEach(p => {
+                        const d = new Date(p.createdAt).toLocaleDateString("en-US", {timeZone: "America/New_York"});
+                        dailyMap[d] = (dailyMap[d] || 0) + 1;
+                    });
+                    const dates = Object.keys(dailyMap).sort((a,b) => new Date(a) - new Date(b));
+                    // Calculate 7-day MA
+                    const maPoints = [];
+                    for(let i=0; i<dates.length; i++) {
+                        if (i < 6) continue;
+                        let sum = 0;
+                        for(let j=0; j<7; j++) sum += dailyMap[dates[i-j]];
+                        maPoints.push({ label: dates[i].split('/')[1] + '/' + dates[i].split('/')[2], val: sum/7 });
+                    }
+                    return maPoints;
+                };
+
+                return {
+                    cumulative: getCumulativeData(),
+                    hourly: getHourlyStats(),
+                    daily: getDailyStats(),
+                    prob: getHourlyProb(),
+                    trend: getTrendData()
+                };
+            }, [posts, activeWindow]);
+
+            const handleTouchMove = (e, type) => {
+                if (!containerRef.current || !chartData) return;
+                const rect = containerRef.current.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = clientX - rect.left;
+                const width = rect.width;
+                const height = rect.height;
+                const relativeX = Math.max(0, Math.min(1, x / width));
+
+                let content = "";
+                
+                if (type === 'cumulative' && chartData.cumulative) {
+                    // Find closest hour (0-168)
+                    const hour = Math.round(relativeX * 168);
+                    // Find Value in current
+                    const currPt = chartData.cumulative.currentPoints.find(p => Math.abs(p.x - hour) < 2);
+                    const pastVals = chartData.cumulative.pastLines.map(l => {
+                        const pt = l.points.find(p => Math.abs(p.x - hour) < 5); // interpolated roughly
+                        return pt ? `${l.label}: ${pt.y}` : null;
+                    }).filter(Boolean).join('\n');
+                    
+                    content = `Hour ${hour}\nCurr: ${currPt ? currPt.y : '-'}\n${pastVals}`;
+                } else if (['hourly', 'daily', 'prob', 'trend'].includes(type)) {
+                    // Bar/Line chart mapping
+                    const dataArr = type === 'hourly' ? chartData.hourly : 
+                                    type === 'daily' ? chartData.daily : 
+                                    type === 'prob' ? chartData.prob : chartData.trend;
+                    const idx = Math.floor(relativeX * dataArr.length);
+                    if (dataArr[idx]) {
+                        content = `${dataArr[idx].label}: ${dataArr[idx].val.toFixed(1)}`;
+                    }
+                }
+
+                setTooltip({ x: clientX, y: rect.top, content });
+            };
+
+            const renderChart = () => {
+                if (!chartData) return <div className="text-gray-500 text-center py-10">Loading Data...</div>;
+                const h = 150;
+                
+                if (activeTab === 'cumulative' && chartData.cumulative) {
+                    const { currentPoints, projPoints, pastLines } = chartData.cumulative;
+                    const maxY = Math.max(
+                        currentPoints[currentPoints.length-1]?.y || 0, 
+                        projPoints[projPoints.length-1]?.y || 0,
+                        ...pastLines.map(l => l.points[l.points.length-1]?.y || 0)
+                    ) * 1.1 || 10;
+                    
+                    const scaleX = (x) => (x / 168) * 100;
+                    const scaleY = (y) => 100 - ((y / maxY) * 100);
+                    const makePath = (pts) => pts.map((p, i) => `${i===0?'M':'L'} ${scaleX(p.x)} ${scaleY(p.y)}`).join(' ');
+
+                    return (
+                        <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                            {/* Past Lines (Gray) */}
+                            {pastLines.map((l, i) => (
+                                <path key={i} d={makePath(l.points)} fill="none" stroke="#333" strokeWidth="0.5" strokeDasharray="2,1" />
+                            ))}
+                            {/* Projection (Dashed Color) */}
+                            {projPoints.length > 0 && (
+                                <path d={makePath(projPoints)} fill="none" stroke="#34d399" strokeWidth="1" strokeDasharray="4,2" />
+                            )}
+                            {/* Current (Solid Color) */}
+                            <path d={makePath(currentPoints)} fill="none" stroke="#38bdf8" strokeWidth="2" />
+                        </svg>
+                    );
+                } 
+                else if (['hourly', 'daily', 'prob'].includes(activeTab)) {
+                    const data = activeTab === 'hourly' ? chartData.hourly : activeTab === 'daily' ? chartData.daily : chartData.prob;
+                    const maxVal = Math.max(...data.map(d => d.val)) || 1;
+                    return (
+                        <div className="flex items-end justify-between h-full space-x-[1px]">
+                            {data.map((d, i) => (
+                                <div key={i} className="flex-1 flex flex-col items-center group relative">
+                                    <div 
+                                        className={`w-full rounded-t-sm transition-all ${activeTab === 'prob' ? 'bg-indigo-600' : 'bg-slate-700'} hover:bg-sky-400`} 
+                                        style={{height: `${(d.val / maxVal) * 100}%`}}
+                                    ></div>
+                                    {(i % 4 === 0 || activeTab === 'daily') && <span className="text-[8px] text-gray-500 mt-1">{d.label}</span>}
+                                </div>
+                            ))}
+                        </div>
+                    );
+                }
+                else if (activeTab === 'trend') {
+                    const data = chartData.trend;
+                    const minVal = Math.min(...data.map(d => d.val)) * 0.9;
+                    const maxVal = Math.max(...data.map(d => d.val)) * 1.1;
+                    const range = maxVal - minVal || 1;
+                    const points = data.map((d, i) => {
+                        const x = (i / (data.length - 1)) * 100;
+                        const y = 100 - ((d.val - minVal) / range) * 100;
+                        return `${i===0?'M':'L'} ${x} ${y}`;
+                    }).join(' ');
+
+                    return (
+                        <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                            <path d={points} fill="none" stroke="#facc15" strokeWidth="1.5" />
+                        </svg>
+                    );
+                }
+            };
+
+            return (
+                <div className="mobile-card p-4 mt-4 select-none">
+                    <div className="flex space-x-2 overflow-x-auto hide-scroll mb-4 border-b border-gray-800 pb-2">
+                        {['cumulative:累積對比', 'trend:趨勢(MA)', 'hourly:時段強度', 'daily:日強度', 'prob:時段機率'].map(t => {
+                            const [key, label] = t.split(':');
+                            return (
+                                <button 
+                                    key={key} 
+                                    onClick={() => setActiveTab(key)}
+                                    className={`px-3 py-1 text-xs whitespace-nowrap rounded-full transition-colors ${activeTab === key ? 'bg-sky-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+                                >
+                                    {label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    
+                    <div 
+                        className="h-40 w-full relative bg-gray-900/30 rounded border border-gray-800/50 p-2"
+                        ref={containerRef}
+                        onTouchMove={(e) => handleTouchMove(e, activeTab)}
+                        onMouseMove={(e) => handleTouchMove(e, activeTab)}
+                        onMouseLeave={() => setTooltip(null)}
+                        onTouchEnd={() => setTooltip(null)}
+                    >
+                        {renderChart()}
+                        {tooltip && (
+                            <div className="chart-tooltip" style={{left: tooltip.x, top: tooltip.y}}>
+                                <pre>{tooltip.content}</pre>
+                            </div>
+                        )}
+                    </div>
+                    <div className="text-[9px] text-gray-500 mt-2 text-right">
+                        {activeTab === 'cumulative' && "實線:本週 虛線:預測 灰線:前4週同期"}
+                        {activeTab === 'trend' && "7日移動平均線 (7-Day MA)"}
+                        {activeTab === 'prob' && "過去90天該時段有發文的天數比例"}
+                    </div>
                 </div>
             );
         };
@@ -631,6 +988,17 @@
             }, []);
 
             const [hoursToTarget, setHoursToTarget] = useState(0);
+
+            // Active Window for Chart & Heatmap Sync
+            const currentActiveWindow = useMemo(() => {
+                const t = new Date();
+                t.setDate(t.getDate() - ((t.getDay() + 5) % 7)); // Go back to last Tuesday
+                const gridStartTimeMs = Date.UTC(t.getFullYear(), t.getMonth(), t.getDate(), 5, 0, 0);
+                const activeStartMs = gridStartTimeMs + (12 * 3600000);
+                const activeEndMs = activeStartMs + (7 * 24 * 3600000);
+                return { gridStartTimeMs, activeStartMs, activeEndMs };
+            }, []);
+
 
             // --- Time Setup ---
             useEffect(() => {
@@ -1083,153 +1451,6 @@
                 return { probs: [calcP(1), calcP(2), calcP(3), calcP(4)], longSilenceProbs, status, statusColor, advice };
             }, [posts, hoursSinceLast, currentTime]);
 
-            const StatsDetailModal = ({ detail, onClose }) => {
-                if (!detail) return null;
-                const { label, data, hours } = detail;
-                return (
-                    <div className="modal-backdrop" onClick={onClose}>
-                        <div className="bg-[#111] border border-gray-700 rounded-xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                            <div className="bg-gray-900 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
-                                <div className="flex items-center space-x-2">
-                                    <BarChart2 className="w-5 h-5 text-sky-500" />
-                                    <h3 className="text-white font-bold text-lg">{label} 區間數據詳情</h3>
-                                </div>
-                                <button onClick={onClose} className="text-gray-400 hover:text-white"><XCircle className="w-6 h-6" /></button>
-                            </div>
-                            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                                <div className="text-xs text-gray-500 text-center mb-2">基於過去 90 天內，共 {data.samples.toLocaleString()} 個樣本</div>
-                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-emerald-500 font-bold flex items-center"><ChevronDown className="w-4 h-4 mr-1"/>歷史最低 (MIN)</span>
-                                        <span className="text-2xl font-mono font-bold text-white">{data.min} <span className="text-xs text-gray-500">篇</span></span>
-                                    </div>
-                                    <div className="text-[11px] text-gray-400 space-y-1">
-                                        <div className="flex justify-between"><span>發生時間:</span><span className="text-emerald-400 font-mono">{formatTimeRange(data.minTime, hours)}</span></div>
-                                        <div className="flex justify-between"><span>出現頻率:</span><span className="text-white font-mono">{data.minFreq}%</span></div>
-                                    </div>
-                                </div>
-                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-sky-500 font-bold flex items-center"><Activity className="w-4 h-4 mr-1"/>歷史平均 (AVG)</span>
-                                        <span className="text-2xl font-mono font-bold text-white">{data.avg} <span className="text-xs text-gray-500">篇</span></span>
-                                    </div>
-                                </div>
-                                <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-red-500 font-bold flex items-center"><ChevronUp className="w-4 h-4 mr-1"/>歷史最高 (MAX)</span>
-                                        <span className="text-2xl font-mono font-bold text-white">{data.max} <span className="text-xs text-gray-500">篇</span></span>
-                                    </div>
-                                    <div className="text-[11px] text-gray-400 space-y-1">
-                                        <div className="flex justify-between"><span>發生時間:</span><span className="text-red-400 font-mono">{formatTimeRange(data.maxTime, hours)}</span></div>
-                                        <div className="flex justify-between"><span>出現頻率:</span><span className="text-white font-mono">{data.maxFreq}%</span></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            const RateRow = ({ label, data, hours, remainingHours, currentTotal, totalPosts, onDetailClick }) => {
-                if (!data) return null;
-                const ratioNum = parseInt(data.ratio);
-                const isHigh = ratioNum >= 100;
-                const currentSpeed = (parseFloat(data.current) / hours).toFixed(1);
-                const historyAvgSpeed = (parseFloat(data.avg) / hours);
-                let speedColorClass = "text-gray-500"; 
-                const speedDiff = parseFloat(currentSpeed) - historyAvgSpeed;
-                if (speedDiff > 0) {
-                    if (parseFloat(currentSpeed) > historyAvgSpeed * 1.2) speedColorClass = "text-red-500 font-bold"; 
-                    else speedColorClass = "text-orange-400"; 
-                } else if (speedDiff <= 0) { speedColorClass = "text-emerald-500"; }
-                const additional = remainingHours > 0 ? (parseFloat(currentSpeed) * remainingHours) : 0;
-                const totalProjected = (typeof currentTotal === 'number' ? currentTotal : 0) + additional;
-                const baseTotal = typeof currentTotal === 'number' ? currentTotal : 0;
-
-                return (
-                    <div className="py-3 border-b border-gray-800 last:border-0">
-                        <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm text-gray-400 font-bold w-10">{label}</span>
-                            <div className="flex items-center space-x-2">
-                                <div className="text-[10px] text-gray-400 bg-slate-800/50 px-1 rounded flex items-center border border-slate-700" title="最新發文數 + (目前速度 * 剩餘時數)">
-                                    <span className="text-gray-500 mr-1.5 font-mono">{data.pos.toFixed(0)}%</span>
-                                    <Forward className="w-2.5 h-2.5 mr-0.5 text-blue-400" />
-                                    {totalProjected.toFixed(1)}
-                                </div>
-                                <div className={`text-[10px] font-mono bg-gray-900 px-1 rounded border border-gray-800 ${speedColorClass}`}>
-                                    {currentSpeed}/h
-                                </div>
-                                <span className="text-base font-bold text-white">{data.current} <span className="text-xs text-gray-500 font-normal">篇</span></span>
-                            </div>
-                        </div>
-                        
-                        <div className="flex justify-between items-end text-xs text-gray-500 mb-1 px-1">
-                            <div className="flex flex-col items-center clickable-stat hover:text-emerald-400" onClick={() => onDetailClick({label, data, hours, type: 'min'})}>
-                                <span>Min: {baseTotal + data.min} <span className="text-[9px] text-gray-600">({data.minFreq}%)</span></span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                                <span className={`text-[10px] font-bold ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>{isHigh ? '>' : '<'} {data.ratio}%</span>
-                                <span className="text-gray-400 clickable-stat hover:text-sky-400" onClick={() => onDetailClick({label, data, hours, type: 'avg'})}>
-                                    Avg: {(baseTotal + parseFloat(data.avg)).toFixed(1)}
-                                </span>
-                            </div>
-                            <div className="flex flex-col items-center clickable-stat hover:text-red-400" onClick={() => onDetailClick({label, data, hours, type: 'max'})}>
-                                <span>Max: {baseTotal + data.max} <span className="text-[9px] text-gray-600">({data.maxFreq}%)</span></span>
-                            </div>
-                        </div>
-                        <div className="gauge-track w-full mt-1">
-                            <div className="gauge-fill" style={{width: `${data.pos}%`}}></div>
-                        </div>
-                    </div>
-                );
-            };
-
-            const HistoryCompareRow = ({ label, data }) => {
-                if (!data) return null;
-                const ratioNum = parseInt(data.ratio7d);
-                const isHigh = ratioNum >= 100;
-                return (
-                    <div className="py-2 border-b border-gray-800 last:border-0">
-                        {/* New Layout: Label ... Avg ... Current */}
-                        <div className="flex justify-between items-center mb-1 sticky left-0 bg-[#111]">
-                            <span className="text-sm text-sky-400 font-bold w-12">{label}</span>
-                            
-                            {/* Center: Avg & Ratio */}
-                            <div className="flex flex-col items-center leading-none">
-                                <span className="text-[10px] text-gray-400 font-mono">7D Avg: {data.avg7d}</span>
-                                <span className={`text-[9px] font-bold mt-0.5 ${isHigh ? 'text-red-500' : 'text-emerald-500'}`}>
-                                    {isHigh ? '>' : '<'} {data.ratio7d}%
-                                </span>
-                            </div>
-
-                            {/* Right: Current Value */}
-                            <span className="text-base text-white font-mono bg-gray-800 px-2 rounded w-10 text-center">{data.current}</span>
-                        </div>
-                        <div className="flex space-x-2 text-center pb-1 justify-between">
-                            {data.history.map((val, idx) => (
-                                <div key={idx} className="flex-1 flex flex-col items-center bg-gray-900/50 rounded py-1">
-                                    <span className="text-[8px] text-gray-500">-{idx+1}d</span>
-                                    <span className={`text-[10px] font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>{val}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                );
-            };
-
-            const SilenceProbBadge = ({ label, prob }) => {
-                const p = parseInt(prob);
-                let color = "text-gray-500";
-                if (p > 70) color = "text-emerald-400 font-bold";
-                else if (p > 40) color = "text-sky-400";
-                return (
-                    <div className="flex flex-col items-center bg-gray-900/40 rounded p-1 border border-gray-800/50">
-                        <span className="text-[9px] text-gray-500">{label}</span>
-                        <span className={`text-xs font-mono ${color}`}>{prob}%</span>
-                    </div>
-                );
-            };
-
             return (
                 <div className="min-h-screen pb-safe-area-bottom">
                     {/* Header */}
@@ -1446,6 +1667,9 @@
 
                              {/* Weekly Heatmap */}
                             <WeeklyHeatmap posts={posts} liveCount={specialCount} />
+
+                            {/* Chart Section */}
+                            <ChartSection posts={posts} activeWindow={currentActiveWindow} />
 
                             {/* Last 10 Posts & RT Stats */}
                             <div className="mobile-card p-4">
