@@ -119,8 +119,9 @@
             border: 1px solid #222;
         }
         .heat-cell-inactive {
-            background-color: #000;
-            color: #333;
+            background-color: #022c22; /* Dark Emerald (Modified) */
+            color: #065f46;
+            border-color: #064e3b;
         }
         .heat-cell-0 {
             background-color: #064e3b; /* Emerald 900 */
@@ -371,37 +372,40 @@
         };
         
         // --- Range Analysis Modal ---
-        const RangeAnalysisModal = ({ data, onClose, currentCount, hoursToTarget }) => {
+        const RangeAnalysisModal = ({ data, onClose, currentCount, hoursToTarget, avgDailySilence }) => {
             if (!data) return null;
             const { range, prob } = data;
             const [start, end] = range.split('~').map(Number);
             const deltaStart = Math.max(0, start - currentCount);
             const deltaEnd = Math.max(0, end - currentCount);
-            const reqSpeedMin = hoursToTarget > 0 ? deltaStart / hoursToTarget : 0;
-            const reqSpeedMax = hoursToTarget > 0 ? deltaEnd / hoursToTarget : 0;
-
-            const timeHalf = hoursToTarget / 2;
-            const targetMid = (start + end) / 2;
+            
+            // Calculate active hours by deducting average rest time (prorated)
+            const estRest = (hoursToTarget / 24) * avgDailySilence;
+            const activeHours = Math.max(0.1, hoursToTarget - estRest);
+            
+            // Speed required during ACTIVE hours
+            const activeRateMin = deltaStart / activeHours;
+            const activeRateMax = deltaEnd / activeHours;
             
             let analysis = {
-                bg: "【精準著陸】如同火箭回收，需精確控制在區間內，不能太快也不能太慢。",
-                up: "維持均速在 " + reqSpeedMin.toFixed(2) + " ~ " + reqSpeedMax.toFixed(2) + " 篇/hr (精準控速)。",
-                down: "均速 > " + reqSpeedMax.toFixed(2) + " (衝過頭) 或 < " + reqSpeedMin.toFixed(2) + " (動力不足)。",
+                bg: `【精準著陸】總時數 ${hoursToTarget.toFixed(1)}h，扣除預估休息 ${estRest.toFixed(1)}h，實戰工時僅 ${activeHours.toFixed(1)}h。`,
+                up: `在實戰時間內，維持均速 ${activeRateMin.toFixed(2)} ~ ${activeRateMax.toFixed(2)} 篇/hr (醒著就要發)。`,
+                down: `均速 > ${activeRateMax.toFixed(2)} (過快) 或 < ${activeRateMin.toFixed(2)} (過慢) 皆會偏離目標。`,
                 type: "正常區間"
             };
             
-            if (reqSpeedMax < 0.5) {
+            if (activeRateMax < 0.8) {
                  analysis = {
-                    bg: "【靜默降落】目標是極低頻率互動，甚至完全靜默。",
-                    up: "保持絕對靜默，或僅進行極低頻率的按讚/轉推。",
-                    down: "只要出現連續發文 (>3篇) 或時速 > " + reqSpeedMax.toFixed(2) + "，即會失敗 (Overshoot)。",
+                    bg: `【靜默降落】目標極低 (${deltaEnd}篇)，實戰工時 ${activeHours.toFixed(1)}h 內幾乎不能發文。`,
+                    up: "保持絕對靜默，或僅進行極低頻率的按讚/轉推 (每小時 < 0.5 篇)。",
+                    down: `一旦清醒時連發 > 3 篇 (時速 > ${activeRateMax.toFixed(2)})，即會衝出區間 (Overshoot)。`,
                     type: "低頻 (Low)"
                 };
-            } else if (reqSpeedMin > 3.0) {
+            } else if (activeRateMin > 5.0) {
                  analysis = {
-                    bg: "【高速巡航】目標是維持高強度輸出，需持續有議題跟進。",
-                    up: "保持高昂的發文節奏，時速需維持在 > " + reqSpeedMin.toFixed(1) + "。",
-                    down: "出現 > 3小時的睡眠或休息 (時速 < " + reqSpeedMin.toFixed(1) + ") 將導致動力不足 (Undershoot)。",
+                    bg: `【極限衝刺】實戰工時 ${activeHours.toFixed(1)}h 內需狂發 ${deltaStart}+ 篇，難度極高。`,
+                    up: `清醒時必須維持 "狂暴模式" (時速 > ${activeRateMin.toFixed(1)})，不能有任何額外休息。`,
+                    down: `若睡眠時間超過預期的 ${estRest.toFixed(1)}h，或清醒時分心，將無法達成 (Undershoot)。`,
                     type: "激進 (Burst)"
                 };
             }
@@ -432,7 +436,7 @@
                                 </div>
                             </div>
                             <div className="text-[9px] text-gray-500 text-center pt-2">
-                                需在剩餘 {hoursToTarget.toFixed(1)}h 內增加 {deltaStart}~{deltaEnd} 篇 (均速 {reqSpeedMin.toFixed(2)}~{reqSpeedMax.toFixed(2)}/h)
+                                需增加 {deltaStart}~{deltaEnd} 篇 | 實戰均速 {activeRateMin.toFixed(2)}~{activeRateMax.toFixed(2)}/h
                             </div>
                         </div>
                      </div>
@@ -443,6 +447,23 @@
         const RangeProbabilities = ({ posts, currentCount, hoursToTarget }) => {
             const [probs, setProbs] = useState([]);
             const [selectedRange, setSelectedRange] = useState(null);
+
+            // Calculate Avg Daily Silence (>3h gaps)
+            const avgDailySilence = useMemo(() => {
+                if (posts.length < 2) return 0;
+                const sorted = [...posts].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+                let totalSilenceHours = 0;
+                const start = new Date(sorted[0].createdAt);
+                const end = new Date(sorted[sorted.length-1].createdAt);
+                // Total days covered by history (approx)
+                const days = Math.max(1, (end - start) / (1000 * 60 * 60 * 24));
+                
+                for(let i=0; i<sorted.length-1; i++) {
+                    const diff = (new Date(sorted[i+1].createdAt) - new Date(sorted[i].createdAt)) / 3600000;
+                    if(diff > 3) totalSilenceHours += diff;
+                }
+                return totalSilenceHours / days;
+            }, [posts]);
 
             useEffect(() => {
                 if (!posts.length || hoursToTarget <= 0) {
@@ -572,6 +593,7 @@
                             data={selectedRange} 
                             currentCount={currentCount} 
                             hoursToTarget={hoursToTarget} 
+                            avgDailySilence={avgDailySilence}
                             onClose={() => setSelectedRange(null)} 
                         />
                     )}
