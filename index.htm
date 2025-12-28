@@ -193,15 +193,28 @@
             };
 
             const keyDates = useMemo(() => getKeyDates(viewMonth), [viewMonth]);
+            const today = useMemo(() => new Date(), []);
 
-            // Auto-Select Logic: On load/refresh, select the latest available date that has data
+            // Helper to check if a date is strictly in the future (comparing YYYY-MM-DD)
+            const isFutureDate = (d) => {
+                const check = new Date(d);
+                const now = new Date();
+                check.setHours(0,0,0,0);
+                now.setHours(0,0,0,0);
+                return check > now;
+            };
+
+            // Filter keyDates to hide future dates
+            const availableKeyDates = useMemo(() => {
+                return keyDates.filter(d => !isFutureDate(d));
+            }, [keyDates]);
+
+            // Auto-Select Logic
             useEffect(() => {
-                if (keyDates.length > 0) {
-                    // Default to the last available date in the list (most recent in month)
-                    // If liveCount is active, this logic helps sync view
-                     setSelectedDate(keyDates[keyDates.length - 1]);
+                if (availableKeyDates.length > 0) {
+                     setSelectedDate(availableKeyDates[availableKeyDates.length - 1]);
                 }
-            }, [keyDates]); // Only run when keyDates change (month change or init)
+            }, [viewMonth]); 
 
             const changeMonth = (delta) => {
                 const newDate = new Date(viewMonth);
@@ -209,32 +222,46 @@
                 setViewMonth(newDate);
             };
 
-            // Calculate Historical Ratio for a specific column
-            const getHistoricalRatio = (targetDate, currentVal, hoursSoFar) => {
-                if (!targetDate || posts.length === 0) return { avg: 0, ratio: 0, isPartial: false };
+            // Active Window Calculation (12:00 to 12:00)
+            const activeWindow = useMemo(() => {
+                if (!selectedDate) return null;
+                const year = selectedDate.getFullYear();
+                const month = selectedDate.getMonth();
+                const date = selectedDate.getDate();
+                const etOffset = 5; 
+                
+                // Grid starts at 00:00 ET of start day (to render the full column)
+                const gridStartTimeMs = Date.UTC(year, month, date, etOffset, 0, 0); 
+                
+                // Active period: Start Day 12:00 ET -> End Day (+7) 12:00 ET
+                const activeStartMs = gridStartTimeMs + (12 * 3600000); 
+                const activeEndMs = activeStartMs + (7 * 24 * 3600000); 
 
-                const targetDay = targetDate.getDay(); // 2 or 5
-                // Check if targetDate is "Today" (ET wise)
-                // Note: The heatmap is based on ET. We need to check if targetDate matches current ET date.
+                return { gridStartTimeMs, activeStartMs, activeEndMs };
+            }, [selectedDate]);
+
+
+            // Calculate Historical Stats for a specific column
+            // Now accepts dayIndex to handle 12:00 cutoffs correctly
+            const getHistoricalStats = (targetDate, currentVal, dayIndex) => {
+                if (!targetDate || posts.length === 0) return { avgTotal: 0, avgSoFar: 0, projected: 0, isToday: false, isFuture: false };
+
                 const nowET = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
-                const isToday = targetDate.getDate() === nowET.getDate() && 
-                                targetDate.getMonth() === nowET.getMonth() && 
-                                targetDate.getFullYear() === nowET.getFullYear();
                 
-                // If today, we only compare up to the current hour
-                const currentHourET = nowET.getHours();
-                const cutoffHour = isToday ? currentHourET : 24;
+                // Compare Date Objects (YYYY-MM-DD) for ET
+                const targetET = new Date(targetDate.toLocaleString("en-US", {timeZone: "America/New_York"}));
+                targetET.setHours(0,0,0,0);
+                const todayET = new Date(nowET);
+                todayET.setHours(0,0,0,0);
 
-                // Find historical dates
-                // Filter posts from last 90 days
-                const timestamps = posts.map(p => new Date(p.createdAt));
+                const isToday = targetET.getTime() === todayET.getTime();
+                const isFuture = targetET.getTime() > todayET.getTime();
+
+                // If today, we look up to current hour
+                const currentHourET = nowET.getHours();
                 
-                // We need to group by Day (ET)
-                // This is expensive, so we do a simplified version:
-                // Find all dates in past 90 days that match targetDay
-                // Calculate their sums up to cutoffHour
-                
-                let sum = 0;
+                let sumTotal = 0;
+                let sumSoFar = 0;
                 let count = 0;
                 
                 // Iterate back 12 weeks
@@ -242,47 +269,65 @@
                     const pastDate = new Date(targetDate);
                     pastDate.setDate(pastDate.getDate() - (i * 7));
                     
-                    // Simple check: Is this pastDate within our posts range?
-                    // We just query posts for that specific ET day
                     const startMs = Date.UTC(pastDate.getFullYear(), pastDate.getMonth(), pastDate.getDate(), 5, 0, 0); // 00:00 ET
-                    const endMs = startMs + (cutoffHour * 3600000); // Up to cutoff hour
-                    
-                    // Only count if within known history
-                    // Check if we have posts around this time (very rough check)
-                    const relevantPosts = posts.filter(p => {
+                    const endMs = startMs + (24 * 3600000); // Full Day
+                    const cutoffMs = startMs + (currentHourET * 3600000); // Up to current hour
+
+                    // Apply Cycle Filter logic for history
+                    let validStart = startMs;
+                    let validEnd = endMs;
+
+                    if (dayIndex === 0) {
+                        // First day: Valid only >= 12:00
+                        validStart = startMs + (12 * 3600000); 
+                    } else if (dayIndex === 7) {
+                        // Last day: Valid only < 12:00
+                        validEnd = startMs + (12 * 3600000); 
+                    }
+                    // Middle days (1-6): Valid all day
+
+                    const dayPosts = posts.filter(p => {
                         const t = new Date(p.createdAt).getTime();
-                        return t >= startMs && t < endMs;
+                        return t >= validStart && t < validEnd;
+                    });
+                    
+                    const soFarPosts = dayPosts.filter(p => {
+                         const t = new Date(p.createdAt).getTime();
+                         return t < cutoffMs;
                     });
 
-                    // Only add to average if the past date is effectively in the dataset
-                    // We assume dataset is contiguous 90 days.
-                    // If pastDate > oldestPost, we count it.
                     const oldestPost = posts[posts.length-1];
                     if (oldestPost && pastDate > new Date(oldestPost.createdAt)) {
-                        sum += relevantPosts.length;
+                        sumTotal += dayPosts.length;
+                        sumSoFar += soFarPosts.length;
                         count++;
                     }
                 }
                 
-                const avg = count > 0 ? (sum / count) : 0;
-                const ratio = avg > 0 ? Math.round((currentVal / avg) * 100) : 0;
+                const avgTotal = count > 0 ? (sumTotal / count) : 0;
+                const avgSoFar = count > 0 ? (sumSoFar / count) : 0;
                 
-                return { avg: avg.toFixed(1), ratio, isPartial: isToday, cutoffHour };
+                // Projection Logic for Today: (Current / AvgSoFar) * AvgTotal
+                let projected = 0;
+                if (isToday) {
+                    if (avgSoFar > 0.1) {
+                        projected = (currentVal / avgSoFar) * avgTotal;
+                    } else {
+                        projected = currentVal + (avgTotal - avgSoFar); 
+                    }
+                } else if (isFuture) {
+                    projected = avgTotal;
+                }
+
+                return { avgTotal, avgSoFar, projected, isToday, isFuture };
             };
 
 
             // Build Grid Data
             const gridData = useMemo(() => {
-                if (!selectedDate) return null;
-                
-                const year = selectedDate.getFullYear();
-                const month = selectedDate.getMonth();
-                const date = selectedDate.getDate();
-                const etOffset = 5; 
-                const gridStartTimeMs = Date.UTC(year, month, date, etOffset, 0, 0);
-                const activeStartMs = Date.UTC(year, month, date, 12 + etOffset, 0, 0);
+                if (!activeWindow) return null;
+                const { gridStartTimeMs, activeStartMs, activeEndMs } = activeWindow;
                 const oneDay = 24 * 60 * 60 * 1000;
-                const endOfPeriodMs = activeStartMs + 7 * oneDay;
                 
                 const grid = Array(24).fill(0).map(() => Array(8).fill(0));
                 
@@ -304,14 +349,17 @@
                     headers.push(new Date(gridStartTimeMs + i * oneDay));
                 }
                 
-                return { grid, headers, activeStart: new Date(activeStartMs), activeEnd: new Date(endOfPeriodMs) };
+                return { grid, headers, activeStartMs, activeEndMs };
 
-            }, [selectedDate, posts]);
+            }, [activeWindow, posts]);
 
-            const getCellClass = (val, dayIdx, hourIdx, activeStart, activeEnd, currentCellTime) => {
-                const isActive = currentCellTime >= activeStart && currentCellTime < activeEnd;
-                if (!isActive) return "heat-cell-inactive text-gray-700";
-                if (val === 0) return "heat-cell-0"; 
+            const getCellClass = (val, cellTimeMs, activeStartMs, activeEndMs) => {
+                // Strict Cycle Check: Black out if outside 12:00-12:00 window
+                if (cellTimeMs < activeStartMs || cellTimeMs >= activeEndMs) {
+                    return "bg-[#111] border border-[#222] text-[#333]"; // "Blackout" style
+                }
+
+                if (val === 0) return "heat-cell-inactive text-gray-700";
                 if (val >= 10) return "heat-cell-hot";
                 return "bg-emerald-800 text-emerald-100";
             };
@@ -324,23 +372,47 @@
                 }).replace(/(\d+)/, '\n$1');
             };
 
-            // Calculate Grand Total for the active range
-            const activeRangeTotal = useMemo(() => {
-                if (!gridData) return 0;
-                let sum = 0;
-                gridData.grid.forEach((row, hIdx) => {
-                    row.forEach((val, dIdx) => {
-                        const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                        const isActive = cellTimeMs >= gridData.activeStart.getTime() && cellTimeMs < gridData.activeEnd.getTime();
-                        if (isActive) sum += val;
-                    });
-                });
-                return sum;
-            }, [gridData]);
+            // Calculate Grand Total logic
+            const summaryData = useMemo(() => {
+                if (!gridData) return { totalActual: 0, totalProjected: 0 };
+                
+                let totalActual = 0;
+                let totalProjected = 0;
 
-            // Separate dates into rows
-            const tuesdayDates = keyDates.filter(d => d.getDay() === 2);
-            const fridayDates = keyDates.filter(d => d.getDay() === 5);
+                gridData.headers.forEach((d, dIdx) => {
+                    const isFuture = isFutureDate(d);
+                    
+                    // Sum ONLY visible/active cells for this column
+                    const colSum = gridData.grid.reduce((acc, row, hIdx) => {
+                         const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                         // Strict check for statistics too
+                         if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
+                             return acc + row[dIdx];
+                         }
+                         return acc;
+                    }, 0);
+
+                    // If future date, actual is 0 (even if grid has stale data)
+                    const validActual = isFuture ? 0 : colSum;
+                    totalActual += validActual;
+
+                    // Projection Logic
+                    const { projected, isToday, isFuture: isFutStats } = getHistoricalStats(d, validActual, dIdx);
+                    
+                    if (isFutStats) {
+                        totalProjected += projected;
+                    } else if (isToday) {
+                        totalProjected += projected;
+                    } else {
+                        totalProjected += validActual;
+                    }
+                });
+                
+                return { totalActual, totalProjected };
+            }, [gridData, posts]); 
+
+            const tuesdayDates = availableKeyDates.filter(d => d.getDay() === 2);
+            const fridayDates = availableKeyDates.filter(d => d.getDay() === 5);
 
             return (
                 <div className="mobile-card p-4 mb-4">
@@ -358,9 +430,8 @@
                         </div>
                     </div>
                     
-                    {/* Date Selector Pills - Grouped by Cycle */}
+                    {/* Date Selector Pills */}
                     <div className="flex flex-col gap-2 mb-4 bg-gray-900/30 p-2 rounded-lg border border-gray-800">
-                        {/* Tuesdays */}
                         <div className="flex items-center space-x-2">
                             <span className="text-[9px] text-gray-500 w-6">Tue</span>
                             <div className="flex flex-wrap gap-2">
@@ -379,7 +450,6 @@
                                 ))}
                             </div>
                         </div>
-                        {/* Fridays */}
                         <div className="flex items-center space-x-2 border-t border-gray-800/50 pt-2">
                             <span className="text-[9px] text-gray-500 w-6">Fri</span>
                             <div className="flex flex-wrap gap-2">
@@ -419,66 +489,109 @@
                                             {hIdx.toString().padStart(2, '0')}:00
                                         </div>
                                         {row.map((val, dIdx) => {
-                                            const cellTime = new Date(gridData.headers[dIdx]);
                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                                            const targetDate = gridData.headers[dIdx];
+                                            const isFuture = isFutureDate(targetDate);
+                                            
+                                            // 1. If strict future day, value is 0.
+                                            // 2. If valid time but outside cycle, getCellClass will hide it.
+                                            
+                                            const displayVal = isFuture ? 0 : val;
+                                            const isActive = cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs;
+
                                             return (
                                                 <div 
                                                     key={dIdx} 
-                                                    className={`flex-1 mx-[1px] rounded-sm heat-cell ${getCellClass(val, dIdx, hIdx, gridData.activeStart, gridData.activeEnd, new Date(cellTimeMs))}`}
+                                                    className={`flex-1 mx-[1px] rounded-sm heat-cell ${getCellClass(displayVal, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs)}`}
                                                 >
-                                                    {val > 0 ? val : ''}
+                                                    {displayVal > 0 && isActive ? displayVal : ''}
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 ))}
-                                {/* Total Row */}
+                                
+                                {/* Line 2 (Summary Line 1): Actual Total */}
                                 <div className="flex h-6 mt-1 border-t border-gray-800 pt-1">
                                      <div className="w-8 text-[9px] text-sky-500 text-right pr-2 leading-[20px] font-bold">
                                         Total
                                      </div>
                                      {gridData.grid[0].map((_, dIdx) => {
-                                         // Sum column ONLY for active range logic? No, typically Heatmap shows Full Day or Active Range.
-                                         // Let's sum the visible column (24H) as per standard request, or just active range?
-                                         // The previous code did active range sum for the Grand Total, but column sum for visual.
-                                         // Let's do Full Day Sum for the Ratio comparison to make sense visually.
+                                         const targetDate = gridData.headers[dIdx];
+                                         const isFuture = isFutureDate(targetDate);
                                          
-                                         const colSum = gridData.grid.reduce((acc, row) => acc + row[dIdx], 0);
+                                         // Sum ONLY visible/active cells for this column
+                                         const colSum = isFuture ? 0 : gridData.grid.reduce((acc, row, hIdx) => {
+                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
+                                                 return acc + row[dIdx];
+                                             }
+                                             return acc;
+                                         }, 0);
                                          
                                          return (
                                              <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">
-                                                 {colSum}
+                                                 {isFuture ? '-' : colSum}
                                              </div>
                                          )
                                      })}
                                 </div>
-                                {/* Ratio Row (New) */}
+
+                                {/* Line 3: Projection / Avg */}
                                 <div className="flex mt-1 pb-1">
                                      <div className="w-8 text-[9px] text-gray-500 text-right pr-2 leading-[14px]">
-                                        vsAvg
+                                        Proj.
                                      </div>
                                      {gridData.grid[0].map((_, dIdx) => {
-                                         // Calculate full sum for this day to match visual
-                                         const colSum = gridData.grid.reduce((acc, row) => acc + row[dIdx], 0);
+                                         // Use the same filtered colSum logic
                                          const targetDate = gridData.headers[dIdx];
-                                         const { ratio, isPartial, cutoffHour } = getHistoricalRatio(targetDate, colSum);
+                                         const isFuture = isFutureDate(targetDate);
+                                         const colSum = isFuture ? 0 : gridData.grid.reduce((acc, row, hIdx) => {
+                                             const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) {
+                                                 return acc + row[dIdx];
+                                             }
+                                             return acc;
+                                         }, 0);
+
+                                         const { projected, isToday, isFuture: isFutStats, avgTotal } = getHistoricalStats(targetDate, colSum, dIdx);
                                          
-                                         const color = ratio >= 100 ? "text-red-400" : "text-emerald-400";
+                                         let content = "";
+                                         let color = "text-gray-600";
+                                         
+                                         if (isToday) {
+                                            content = projected.toFixed(1);
+                                            color = "text-emerald-400 font-bold";
+                                         } else if (isFutStats) {
+                                            content = avgTotal.toFixed(1);
+                                            color = "text-gray-500";
+                                         } else {
+                                            // Past
+                                            content = "-"; 
+                                         }
                                          
                                          return (
                                              <div key={dIdx} className="flex-1 flex flex-col items-center">
-                                                 <span className={`text-[9px] font-mono font-bold leading-[14px] ${color}`}>
-                                                     {ratio}%
+                                                 <span className={`text-[9px] font-mono leading-[14px] ${color}`}>
+                                                     {content}
                                                  </span>
-                                                 {isPartial && (
-                                                     <span className="text-[7px] text-gray-600 leading-none scale-75">
-                                                        (至{cutoffHour}時)
-                                                     </span>
-                                                 )}
                                              </div>
                                          )
                                      })}
                                 </div>
+
+                                {/* Line 4: Grand Summaries (Right Aligned) */}
+                                <div className="flex justify-end mt-2 pt-2 border-t border-gray-800/50 space-x-4 pr-1">
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[9px] text-gray-500">總預估值 (Total Proj)</span>
+                                        <span className="text-sm font-mono font-bold text-emerald-400">{summaryData.totalProjected.toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[9px] text-gray-500">目前總數 (Total Actual)</span>
+                                        <span className="text-sm font-mono font-bold text-sky-400">{summaryData.totalActual}</span>
+                                    </div>
+                                </div>
+
                              </div>
                         </div>
                     )}
@@ -1374,6 +1487,7 @@
                         </div>
                     )}
                     
+                    {/* Render Modal */}
                     <StatsDetailModal detail={selectedStatDetail} onClose={() => setSelectedStatDetail(null)} />
                 </div>
             );
