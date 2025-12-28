@@ -310,9 +310,14 @@
                 if (!startTs) return "N/A";
                 const startDate = new Date(startTs);
                 const endDate = new Date(startTs + h * 3600000);
-                const dateStr = startDate.toLocaleDateString('zh-TW', {month:'numeric', day:'numeric', timeZone: 'America/New_York'});
-                const startStr = startDate.toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'});
-                return `${dateStr} ${startStr}`;
+                
+                const fmt = (d) => d.toLocaleDateString('en-US', {
+                    timeZone: 'America/New_York', month:'numeric', day:'numeric'
+                }) + ' ' + d.toLocaleTimeString('en-US', {
+                    timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'
+                });
+
+                return `${fmt(startDate)}~${fmt(endDate)}`;
             };
 
             return (
@@ -1194,10 +1199,17 @@
                     
                     if (diffHours > 3) {
                          const endedAgo = (now - currentPostTime) / 3600000;
+                         
+                         const fmt = (d) => d.toLocaleDateString('en-US', {
+                            timeZone: 'America/New_York', month:'numeric', day:'numeric'
+                         }) + ' ' + d.toLocaleTimeString('en-US', {
+                            timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'
+                         });
+
                          return {
                              endedAgo: endedAgo.toFixed(1),
                              duration: diffHours.toFixed(1),
-                             date: currentPostTime
+                             range: `${fmt(prevPostTime)}~${fmt(currentPostTime)}`
                          };
                     }
                 }
@@ -1337,8 +1349,8 @@
                                         </div>
                                         {lastLongSilence && (
                                             <div className="text-[9px] text-gray-500 mt-1 pt-1 border-t border-gray-800">
-                                                上一次 &gt;3h: <span className="text-gray-300">{lastLongSilence.endedAgo}h 前</span> 
-                                                <span className="text-gray-600 ml-1">(持續 {lastLongSilence.duration}h)</span>
+                                                上一次 &gt;3h: <span className="text-gray-300 font-mono text-[10px]">{lastLongSilence.range}</span> 
+                                                <span className="text-gray-600 ml-1">({lastLongSilence.duration}h)</span>
                                             </div>
                                         )}
                                         <div className="mt-2 pt-2 border-t border-gray-800">
