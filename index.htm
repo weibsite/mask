@@ -204,6 +204,7 @@
         const AlertOctagon = (props) => <IconBase {...props} path={<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />} />;
         const XCircle = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></g>} />;
         const Calendar = (props) => <IconBase {...props} path={<g><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></g>} />;
+        const PieChart = (props) => <IconBase {...props} path={<g><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></g>} />;
 
         // --- Restored Components ---
         const SilenceProbBadge = ({ label, prob }) => {
@@ -363,6 +364,104 @@
                 </div>
             );
         };
+
+        const RangeProbabilities = ({ posts, currentCount, hoursToTarget }) => {
+            const [probs, setProbs] = useState([]);
+            // Remove calculating state to prevent UI flashing
+
+            useEffect(() => {
+                if (!posts.length || hoursToTarget <= 0) {
+                    if (probs.length > 0) setProbs([]);
+                    return;
+                }
+                
+                // Do not clear probs or set a loading state that hides UI here.
+                
+                const timer = setTimeout(() => {
+                    const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a,b)=>a-b);
+                    const windowMs = hoursToTarget * 3600 * 1000;
+                    const samples = [];
+                    const n = timestamps.length;
+                    
+                    if (timestamps[n-1] - timestamps[0] < windowMs) {
+                         // setCalculating(false);
+                         return;
+                    }
+
+                    // Sliding window sampling (every 1 hour)
+                    let left = 0;
+                    let right = 0;
+                    for (let t = timestamps[0]; t <= timestamps[n-1] - windowMs; t += 3600000) {
+                        while (left < n && timestamps[left] < t) left++;
+                        while (right < n && timestamps[right] < t + windowMs) right++;
+                        samples.push(right - left);
+                    }
+                    
+                    const totalSamples = samples.length;
+                    if (totalSamples === 0) return;
+
+                    const bucketCounts = {};
+                    
+                    samples.forEach(delta => {
+                        const finalVal = (currentCount || 0) + delta;
+                        const bucketIdx = Math.floor(finalVal / 20);
+                        bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
+                    });
+                    
+                    const results = [];
+                    const maxBucketIdx = Math.floor(739 / 20); 
+                    const currentBucketIdx = Math.floor((currentCount || 0) / 20);
+
+                    for (let i = currentBucketIdx; i <= maxBucketIdx; i++) {
+                        const start = i * 20;
+                        const end = start + 19;
+                        
+                        if (end < currentCount) continue;
+                        
+                        const count = bucketCounts[i] || 0;
+                        const prob = (count / totalSamples) * 100;
+                        
+                        if (prob >= 0.1) {
+                            results.push({ range: `${start}~${end}`, prob: prob.toFixed(1) });
+                        }
+                    }
+                    setProbs(results);
+
+                }, 500); 
+
+                return () => clearTimeout(timer);
+            }, [posts, currentCount, hoursToTarget]);
+
+            if (hoursToTarget <= 0) return null;
+
+            return (
+                <div className="mobile-card p-4 mt-4">
+                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center">
+                        <PieChart className="w-3 h-3 mr-1" /> 區間機率預測 (Range Prob)
+                    </h3>
+                    {probs.length === 0 ? (
+                        <div className="text-center py-4 text-[10px] text-gray-500 animate-pulse">
+                            正在模擬 {hoursToTarget.toFixed(1)}h 後的落點...
+                        </div>
+                    ) : (
+                        <div>
+                             <div className="grid grid-cols-4 gap-2">
+                                 {probs.map((p, idx) => (
+                                     <div key={idx} className="bg-gray-800/40 rounded p-2 text-center border border-gray-700/50">
+                                         <div className="text-[10px] text-gray-400">{p.range}</div>
+                                         <div className={`text-sm font-bold font-mono ${parseFloat(p.prob) > 20 ? 'text-emerald-400' : 'text-white'}`}>{p.prob}%</div>
+                                     </div>
+                                 ))}
+                             </div>
+                        </div>
+                    )}
+                    <div className="text-[9px] text-gray-600 mt-2 text-right">
+                        基於過去90天滑動視窗模擬 | 過濾 &lt;0.1%
+                    </div>
+                </div>
+            );
+        };
+
 
         // --- Weekly Heatmap Component ---
         const WeeklyHeatmap = ({ posts, liveCount }) => {
@@ -1541,6 +1640,7 @@
                                     ))}
                                 </div>
                             </div>
+                            <RangeProbabilities posts={posts} currentCount={specialCount} hoursToTarget={hoursToTarget} />
                             <div className="text-center text-[10px] text-gray-600 pt-4 pb-8 flex flex-col items-center">
                                 <div>資料來源: {dataSource} | 總數: {posts.length} 筆</div>
                                 <div className="mt-1">
