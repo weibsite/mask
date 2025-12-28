@@ -206,10 +206,9 @@
         const XCircle = (props) => <IconBase {...props} path={<g><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></g>} />;
         const Calendar = (props) => <IconBase {...props} path={<g><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></g>} />;
         const PieChart = (props) => <IconBase {...props} path={<g><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></g>} />;
-        // Corrected Send icon
         const Send = (props) => <IconBase {...props} path={<g><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></g>} />;
 
-        // --- Define format helpers globally to avoid ReferenceError ---
+        // --- Define format helpers globally ---
         const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
         const formatDateET = (date) => date.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' });
         const formatWeekdayET = (date) => date.toLocaleDateString('zh-TW', { timeZone: 'America/New_York', weekday: 'short' });
@@ -381,11 +380,9 @@
             const deltaStart = Math.max(0, start - currentCount);
             const deltaEnd = Math.max(0, end - currentCount);
             
-            // Calculate active hours by deducting average rest time (prorated)
             const estRest = (hoursToTarget / 24) * avgDailySilence;
             const activeHours = Math.max(0.1, hoursToTarget - estRest);
             
-            // Speed required during ACTIVE hours
             const activeRateMin = deltaStart / activeHours;
             const activeRateMax = deltaEnd / activeHours;
             
@@ -446,18 +443,16 @@
             )
         };
 
-        const RangeProbabilities = ({ posts, currentCount, hoursToTarget }) => {
+        const RangeProbabilities = ({ posts, currentCount, hoursToTarget, setStatsRef }) => {
             const [probs, setProbs] = useState([]);
             const [selectedRange, setSelectedRange] = useState(null);
 
-            // Calculate Avg Daily Silence (>3h gaps)
             const avgDailySilence = useMemo(() => {
                 if (posts.length < 2) return 0;
                 const sorted = [...posts].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
                 let totalSilenceHours = 0;
                 const start = new Date(sorted[0].createdAt);
                 const end = new Date(sorted[sorted.length-1].createdAt);
-                // Total days covered by history (approx)
                 const days = Math.max(1, (end - start) / (1000 * 60 * 60 * 24));
                 
                 for(let i=0; i<sorted.length-1; i++) {
@@ -476,16 +471,13 @@
                 const timer = setTimeout(() => {
                     const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a,b)=>a-b);
                     const windowMs = hoursToTarget * 3600 * 1000;
-                    
                     const now = Date.now();
                     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
                     const cutoffTime = now - thirtyDaysMs;
-
                     const n = timestamps.length;
                     
                     if (timestamps[n-1] - timestamps[0] < windowMs) return;
 
-                    // Sliding window
                     let left = 0;
                     let right = 0;
                     
@@ -527,13 +519,14 @@
                     const maxBucketIdx = Math.floor(739 / 20); 
                     const currentBucketIdx = Math.floor((currentCount || 0) / 20);
 
+                    let webhookStr = "";
+
                     for (let i = currentBucketIdx; i <= maxBucketIdx; i++) {
                         const start = i * 20;
                         const end = start + 19;
                         
                         if (end < currentCount) continue;
                         
-                        // Weighted Probability: 70% Recent, 30% Old
                         let prob = 0;
                         const pR = probsRecent[i] || 0;
                         const pO = probsOld[i] || 0;
@@ -549,15 +542,20 @@
                         const probPercent = prob * 100;
                         
                         if (probPercent >= 0.1) {
-                            results.push({ range: `${start}~${end}`, prob: probPercent.toFixed(1) });
+                            const pStr = probPercent.toFixed(1);
+                            results.push({ range: `${start}~${end}`, prob: pStr });
+                            webhookStr += `${start}~${end}:${pStr}% `;
                         }
                     }
                     setProbs(results);
+                    
+                    // Update ref for webhook
+                    setStatsRef(prev => ({ ...prev, rangeProbs: webhookStr }));
 
                 }, 500); 
 
                 return () => clearTimeout(timer);
-            }, [posts, currentCount, hoursToTarget]);
+            }, [posts, currentCount, hoursToTarget, setStatsRef]);
 
             if (hoursToTarget <= 0) return null;
 
@@ -605,7 +603,7 @@
 
 
         // --- Weekly Heatmap Component ---
-        const WeeklyHeatmap = ({ posts, liveCount }) => {
+        const WeeklyHeatmap = ({ posts, liveCount, setStatsRef }) => {
             const [selectedDate, setSelectedDate] = useState(() => {
                 const saved = localStorage.getItem('elon_tactical_heatmap_date');
                 return saved ? new Date(saved) : new Date();
@@ -811,8 +809,18 @@
                     }
                 });
                 
-                return { totalActual, proj: {min: projMin, avg: projAvg, max: projMax} };
-            }, [gridData, posts]); 
+                const result = { totalActual, proj: {min: projMin, avg: projAvg, max: projMax} };
+
+                // Update ref for webhook
+                setStatsRef(prev => ({
+                    ...prev,
+                    heatmapMin: projMin.toFixed(0),
+                    heatmapAvg: projAvg.toFixed(0),
+                    heatmapMax: projMax.toFixed(0)
+                }));
+
+                return result;
+            }, [gridData, posts, setStatsRef]); 
 
             const tuesdayDates = availableKeyDates.filter(d => d.getDay() === 2);
             const fridayDates = availableKeyDates.filter(d => d.getDay() === 5);
@@ -945,6 +953,95 @@
             );
         };
 
+        const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
+            const [stats, setStats] = useState([]);
+
+            useEffect(() => {
+                if (!posts.length) return;
+                
+                // Known Cycle Starts (Date Strings)
+                const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
+                const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
+
+                const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
+                
+                const cycleCounts = [];
+                
+                targetCycles.forEach(dateStr => {
+                    const parts = dateStr.split('/');
+                    const y = parseInt(parts[0]);
+                    const m = parseInt(parts[1]) - 1;
+                    const d = parseInt(parts[2]);
+                    
+                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
+                    const startMs = Date.UTC(y, m, d, 17, 0, 0); 
+                    const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
+                    
+                    const count = posts.filter(p => {
+                        const t = new Date(p.createdAt).getTime();
+                        return t >= startMs && t < endMs;
+                    }).length;
+                    
+                    cycleCounts.push(count);
+                });
+                
+                const totalCycles = cycleCounts.length;
+                if (totalCycles === 0) return;
+
+                const bucketCounts = {};
+                cycleCounts.forEach(val => {
+                    const bucketIdx = Math.floor(val / 20);
+                    bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
+                });
+                
+                const results = [];
+                const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
+                
+                for(let i=0; i<=maxBucketIdx; i++) {
+                    if (bucketCounts[i]) {
+                        const count = bucketCounts[i];
+                        const prob = (count / totalCycles) * 100;
+                        results.push({
+                            range: `${i*20}~${i*20+19}`,
+                            count: count,
+                            prob: prob.toFixed(1)
+                        });
+                    }
+                }
+                
+                results.sort((a,b) => {
+                    const startA = parseInt(a.range.split('~')[0]);
+                    const startB = parseInt(b.range.split('~')[0]);
+                    return startA - startB;
+                });
+
+                setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
+
+            }, [posts, activeCycleType]);
+
+            if (!stats || !stats.data || stats.data.length === 0) return null;
+
+            return (
+                <div className="mobile-card p-4 mt-4">
+                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center justify-between">
+                        <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史週期分佈 ({stats.type})</div>
+                        <div className="text-[9px] text-gray-600">樣本: {stats.totalCycles} 週</div>
+                    </h3>
+                    <div className="grid grid-cols-4 gap-2">
+                        {stats.data.map((item, idx) => (
+                            <div key={idx} className="bg-gray-900/50 rounded p-2 text-center border border-gray-800">
+                                <div className="text-[10px] text-gray-400">{item.range}</div>
+                                <div className="flex items-baseline justify-center space-x-1">
+                                    <span className="text-sm font-bold text-white">{item.count}</span>
+                                    <span className="text-[9px] text-gray-500 font-mono">({item.prob}%)</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
         const App = () => {
             // --- State ---
             const [posts, setPosts] = useState([]);
@@ -962,6 +1059,19 @@
             // Webhook State
             const [webhookUrl, setWebhookUrl] = useState(() => {
                 return localStorage.getItem('elon_tactical_webhook') || "https://script.google.com/macros/s/AKfycbwJDJIgYP-XB70DpSiAYcVprTo-C5562Lvdj25M4KkxKpMt9OEq417a8ctUUBP-TZkw/exec";
+            });
+            
+            // Stats Ref to hold latest calculated values for webhook
+            const [statsRef, setStatsRef] = useState({
+                predictionAvg: 0,
+                predictionConf: 0,
+                velocity12H: 0,
+                projectedCurrent: 0,
+                projected7Day: 0,
+                heatmapMin: 0,
+                heatmapAvg: 0,
+                heatmapMax: 0,
+                rangeProbs: ""
             });
 
             // Update localStorage when URL changes
@@ -1032,14 +1142,43 @@
 
             const [hoursToTarget, setHoursToTarget] = useState(0);
 
+            // Updated Active Window Detection for Historical Stats
+            const activeCycleType = useMemo(() => {
+                const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
+                
+                const getRecentDay = (dayIndex) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - ((d.getDay() + 7 - dayIndex) % 7));
+                    if (d.getDay() === dayIndex && d.getHours() < 12) {
+                         d.setDate(d.getDate() - 7);
+                    }
+                    d.setHours(12, 0, 0, 0);
+                    return d;
+                };
+
+                const lastTue = getRecentDay(2); // Tue
+                const lastThu = getRecentDay(4); // Thu
+                
+                return lastThu > lastTue ? 'thu' : 'tue';
+            }, []);
+
             const currentActiveWindow = useMemo(() => {
                 const t = new Date();
-                t.setDate(t.getDate() - ((t.getDay() + 5) % 7)); 
-                const gridStartTimeMs = Date.UTC(t.getFullYear(), t.getMonth(), t.getDate(), 5, 0, 0);
+                const dayOffset = activeCycleType === 'thu' ? 4 : 2;
+                
+                 const getRecentStart = (dayIndex) => {
+                    const d = new Date(); 
+                    d.setDate(d.getDate() - ((d.getDay() + 7 - dayIndex) % 7));
+                     return d;
+                };
+                
+                const baseDate = getRecentStart(dayOffset);
+
+                const gridStartTimeMs = Date.UTC(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 5, 0, 0);
                 const activeStartMs = gridStartTimeMs + (12 * 3600000);
                 const activeEndMs = activeStartMs + (7 * 24 * 3600000);
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
-            }, []);
+            }, [activeCycleType]);
 
             useEffect(() => {
                 const timer = setInterval(() => {
@@ -1123,6 +1262,13 @@
                     const maxDelta = allCounts[allCounts.length - 1]; 
                     const avgDelta = weightedAvg;
                     const avgProb = Math.min(100, Math.max(30, 100 - Math.abs(weightedAvg - recentAvg)*5)).toFixed(0);
+
+                    // Update ref for webhook
+                    setStatsRef(prev => ({
+                        ...prev,
+                        predictionAvg: (weightedAvg + currentTotal).toFixed(1),
+                        predictionConf: avgProb
+                    }));
 
                     setPrediction({ 
                         min: minDelta + currentTotal, 
@@ -1228,8 +1374,10 @@
                                 setTimeout(() => setIsNewPost(false), 2000); 
                                 addLog("New post detected! Refreshing...");
                                 
-                                // Trigger Webhook
-                                const msg = `偵測到發文數更新!目前發文數: ${newCount}`;
+                                // Trigger Webhook with dynamic values
+                                const s = statsRef; // Snapshot from state
+                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值A,B,C${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
+                                
                                 sendWebhook(msg);
                                 
                                 fetchFromApi(); 
@@ -1245,7 +1393,7 @@
                     setLoadingSpecial(false); 
                     isFetchingSpecialRef.current = false; 
                 }
-            }, [fetchFromApi, webhookUrl]); // Added webhookUrl to dependencies
+            }, [fetchFromApi, webhookUrl, statsRef]); // Added statsRef to dependencies
 
             useEffect(() => {
                 addLog("System Init...");
@@ -1432,6 +1580,24 @@
                     pos = Math.max(0, Math.min(100, pos));
                     const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
                     
+                    const additional = hoursToTarget > 0 ? (parseFloat(current) / h * hoursToTarget) : 0;
+                    const totalProjected = (typeof specialCount === 'number' ? specialCount : 0) + additional;
+                    
+                    // Update ref for webhook for 12H (just an example, could loop all)
+                    if (h === 12) {
+                         const currentSpeed = (parseFloat(current) / h).toFixed(1);
+                         
+                         // Calculate 7D projection (using avg7d)
+                         // avg7d is avg count in 12H over last 7 days.
+                         // Speed 7d = avg7d / 12
+                         const speed7d = (parseFloat(realTimeComparison[h].avg7d) / 12);
+                         const projected7d = (typeof specialCount === 'number' ? specialCount : 0) + (speed7d * hoursToTarget);
+                         
+                         // We can't update state inside render/memo, but we can return values
+                         // Or use a useEffect to update the ref based on this memo result
+                         // To avoid complexity, let's just calc here and update ref in useEffect [velocityStats]
+                    }
+
                     res[h] = { 
                         current, 
                         avg: avg.toFixed(1), 
@@ -1448,7 +1614,27 @@
                     };
                 });
                 return res;
-            }, [historicalStats, realTimeComparison]);
+            }, [historicalStats, realTimeComparison, hoursToTarget, specialCount]);
+
+            // UseEffect to update statsRef from velocityStats
+            useEffect(() => {
+                if (velocityStats[12] && realTimeComparison[12]) {
+                    const v12 = velocityStats[12];
+                    const r12 = realTimeComparison[12];
+                    const currentSpeed = (parseFloat(v12.current) / 12).toFixed(1);
+                    const totalProjected = (typeof specialCount === 'number' ? specialCount : 0) + (parseFloat(currentSpeed) * hoursToTarget);
+                    
+                    const speed7d = (parseFloat(r12.avg7d) / 12);
+                    const projected7d = (typeof specialCount === 'number' ? specialCount : 0) + (speed7d * hoursToTarget);
+
+                    setStatsRef(prev => ({
+                        ...prev,
+                        velocity12H: currentSpeed,
+                        projectedCurrent: totalProjected.toFixed(0),
+                        projected7Day: projected7d.toFixed(0)
+                    }));
+                }
+            }, [velocityStats, realTimeComparison, hoursToTarget, specialCount]);
 
             // Calculate Last Long Silence > 3h
             const lastLongSilence = useMemo(() => {
@@ -1776,7 +1962,7 @@
                             </div>
 
                              {/* Weekly Heatmap */}
-                            <WeeklyHeatmap posts={posts} liveCount={specialCount} />
+                            <WeeklyHeatmap posts={posts} liveCount={specialCount} setStatsRef={setStatsRef} />
 
                             {/* Chart Section */}
                             
@@ -1819,7 +2005,11 @@
                                     ))}
                                 </div>
                             </div>
-                            <RangeProbabilities posts={posts} currentCount={specialCount} hoursToTarget={hoursToTarget} />
+                            <RangeProbabilities posts={posts} currentCount={specialCount} hoursToTarget={hoursToTarget} setStatsRef={setStatsRef} />
+                            
+                            {/* Insert Historical Range Stats HERE */}
+                            <HistoricalRangeStats posts={posts} currentActiveWindow={currentActiveWindow} activeCycleType={activeCycleType} />
+
                             <div className="text-center text-[10px] text-gray-600 pt-4 pb-8 flex flex-col items-center">
                                 <div>資料來源: {dataSource} | 總數: {posts.length} 筆</div>
                                 <div className="mt-1">
