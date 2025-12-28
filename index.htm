@@ -589,7 +589,7 @@
                     // 2. Get Posts (90 days)
                     const endDate = new Date();
                     const startDate = new Date();
-                    startDate.setDate(startDate.getDate() - 90); 
+                    startDate.setDate(startDate.getDate() - 365; 
 
                     // 加隨機數避免快取
                     const postsTarget = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
