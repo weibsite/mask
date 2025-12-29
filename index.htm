@@ -380,9 +380,11 @@
             const deltaStart = Math.max(0, start - currentCount);
             const deltaEnd = Math.max(0, end - currentCount);
             
+            // Calculate active hours by deducting average rest time (prorated)
             const estRest = (hoursToTarget / 24) * avgDailySilence;
             const activeHours = Math.max(0.1, hoursToTarget - estRest);
             
+            // Speed required during ACTIVE hours
             const activeRateMin = deltaStart / activeHours;
             const activeRateMax = deltaEnd / activeHours;
             
@@ -442,17 +444,110 @@
                 </div>
             )
         };
+        
+        // --- New Historical Range Stats Component ---
+        const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
+            const [stats, setStats] = useState([]);
+
+            useEffect(() => {
+                if (!posts.length) return;
+                
+                // Known Cycle Starts (Date Strings)
+                const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
+                const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
+
+                const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
+                
+                const cycleCounts = [];
+                
+                targetCycles.forEach(dateStr => {
+                    const parts = dateStr.split('/');
+                    const y = parseInt(parts[0]);
+                    const m = parseInt(parts[1]) - 1;
+                    const d = parseInt(parts[2]);
+                    
+                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
+                    const startMs = Date.UTC(y, m, d, 17, 0, 0); 
+                    const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
+                    
+                    const count = posts.filter(p => {
+                        const t = new Date(p.createdAt).getTime();
+                        return t >= startMs && t < endMs;
+                    }).length;
+                    
+                    cycleCounts.push(count);
+                });
+                
+                const totalCycles = cycleCounts.length;
+                if (totalCycles === 0) return;
+
+                const bucketCounts = {};
+                cycleCounts.forEach(val => {
+                    const bucketIdx = Math.floor(val / 20);
+                    bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
+                });
+                
+                const results = [];
+                const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
+                
+                for(let i=0; i<=maxBucketIdx; i++) {
+                    if (bucketCounts[i]) {
+                        const count = bucketCounts[i];
+                        const prob = (count / totalCycles) * 100;
+                        results.push({
+                            range: `${i*20}~${i*20+19}`,
+                            count: count,
+                            prob: prob.toFixed(1)
+                        });
+                    }
+                }
+                
+                results.sort((a,b) => {
+                    const startA = parseInt(a.range.split('~')[0]);
+                    const startB = parseInt(b.range.split('~')[0]);
+                    return startA - startB;
+                });
+
+                setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
+
+            }, [posts, activeCycleType]);
+
+            if (!stats || !stats.data || stats.data.length === 0) return null;
+
+            return (
+                <div className="mobile-card p-4 mt-4">
+                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center justify-between">
+                        <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史週期分佈 ({stats.type})</div>
+                        <div className="text-[9px] text-gray-600">樣本: {stats.totalCycles} 週</div>
+                    </h3>
+                    <div className="grid grid-cols-4 gap-2">
+                        {stats.data.map((item, idx) => (
+                            <div key={idx} className="bg-gray-900/50 rounded p-2 text-center border border-gray-800">
+                                <div className="text-[10px] text-gray-400">{item.range}</div>
+                                <div className="flex items-baseline justify-center space-x-1">
+                                    <span className="text-sm font-bold text-white">{item.count}</span>
+                                    <span className="text-[9px] text-gray-500 font-mono">({item.prob}%)</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
 
         const RangeProbabilities = ({ posts, currentCount, hoursToTarget, setStatsRef }) => {
             const [probs, setProbs] = useState([]);
             const [selectedRange, setSelectedRange] = useState(null);
 
+            // Calculate Avg Daily Silence (>3h gaps)
             const avgDailySilence = useMemo(() => {
                 if (posts.length < 2) return 0;
                 const sorted = [...posts].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
                 let totalSilenceHours = 0;
                 const start = new Date(sorted[0].createdAt);
                 const end = new Date(sorted[sorted.length-1].createdAt);
+                // Total days covered by history (approx)
                 const days = Math.max(1, (end - start) / (1000 * 60 * 60 * 24));
                 
                 for(let i=0; i<sorted.length-1; i++) {
@@ -471,13 +566,16 @@
                 const timer = setTimeout(() => {
                     const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a,b)=>a-b);
                     const windowMs = hoursToTarget * 3600 * 1000;
+                    
                     const now = Date.now();
                     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
                     const cutoffTime = now - thirtyDaysMs;
+
                     const n = timestamps.length;
                     
                     if (timestamps[n-1] - timestamps[0] < windowMs) return;
 
+                    // Sliding window
                     let left = 0;
                     let right = 0;
                     
@@ -953,95 +1051,6 @@
             );
         };
 
-        const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
-            const [stats, setStats] = useState([]);
-
-            useEffect(() => {
-                if (!posts.length) return;
-                
-                // Known Cycle Starts (Date Strings)
-                const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
-                const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
-
-                const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
-                
-                const cycleCounts = [];
-                
-                targetCycles.forEach(dateStr => {
-                    const parts = dateStr.split('/');
-                    const y = parseInt(parts[0]);
-                    const m = parseInt(parts[1]) - 1;
-                    const d = parseInt(parts[2]);
-                    
-                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
-                    const startMs = Date.UTC(y, m, d, 17, 0, 0); 
-                    const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
-                    
-                    const count = posts.filter(p => {
-                        const t = new Date(p.createdAt).getTime();
-                        return t >= startMs && t < endMs;
-                    }).length;
-                    
-                    cycleCounts.push(count);
-                });
-                
-                const totalCycles = cycleCounts.length;
-                if (totalCycles === 0) return;
-
-                const bucketCounts = {};
-                cycleCounts.forEach(val => {
-                    const bucketIdx = Math.floor(val / 20);
-                    bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
-                });
-                
-                const results = [];
-                const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
-                
-                for(let i=0; i<=maxBucketIdx; i++) {
-                    if (bucketCounts[i]) {
-                        const count = bucketCounts[i];
-                        const prob = (count / totalCycles) * 100;
-                        results.push({
-                            range: `${i*20}~${i*20+19}`,
-                            count: count,
-                            prob: prob.toFixed(1)
-                        });
-                    }
-                }
-                
-                results.sort((a,b) => {
-                    const startA = parseInt(a.range.split('~')[0]);
-                    const startB = parseInt(b.range.split('~')[0]);
-                    return startA - startB;
-                });
-
-                setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
-
-            }, [posts, activeCycleType]);
-
-            if (!stats || !stats.data || stats.data.length === 0) return null;
-
-            return (
-                <div className="mobile-card p-4 mt-4">
-                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center justify-between">
-                        <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史週期分佈 ({stats.type})</div>
-                        <div className="text-[9px] text-gray-600">樣本: {stats.totalCycles} 週</div>
-                    </h3>
-                    <div className="grid grid-cols-4 gap-2">
-                        {stats.data.map((item, idx) => (
-                            <div key={idx} className="bg-gray-900/50 rounded p-2 text-center border border-gray-800">
-                                <div className="text-[10px] text-gray-400">{item.range}</div>
-                                <div className="flex items-baseline justify-center space-x-1">
-                                    <span className="text-sm font-bold text-white">{item.count}</span>
-                                    <span className="text-[9px] text-gray-500 font-mono">({item.prob}%)</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        };
-
         const App = () => {
             // --- State ---
             const [posts, setPosts] = useState([]);
@@ -1145,7 +1154,10 @@
             // Updated Active Window Detection for Historical Stats
             const activeCycleType = useMemo(() => {
                 const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
-                
+                const currentDay = now.getDay(); // 0-6 Sun-Sat
+                const currentHour = now.getHours();
+
+                // Logic: Find most recent Tue 12:00 and most recent Thu 12:00
                 const getRecentDay = (dayIndex) => {
                     const d = new Date(now);
                     d.setDate(d.getDate() - ((d.getDay() + 7 - dayIndex) % 7));
@@ -1374,10 +1386,8 @@
                                 setTimeout(() => setIsNewPost(false), 2000); 
                                 addLog("New post detected! Refreshing...");
                                 
-                                // Trigger Webhook with dynamic values
-                                const s = statsRef; // Snapshot from state
-                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值A,B,C${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
-                                
+                                // Trigger Webhook
+                                const msg = `偵測到發文數更新!目前發文數: ${newCount}`;
                                 sendWebhook(msg);
                                 
                                 fetchFromApi(); 
@@ -1410,9 +1420,17 @@
                 setLastUpdated(new Date());
             };
 
-            const parseCSV = (text) => {
+            // ... (App render content omitted to fit response, but includes RangeProbabilities) ...
+            
+            // --- CSV CHUNKED PARSING LOGIC START ---
+            const parseCSVChunked = (text, onComplete) => {
                 const lines = text.split(/\r?\n/);
-                if (lines.length < 2) return [];
+                const total = lines.length;
+                let current = 1; // skip header (index 0 is header)
+                const chunkSize = 200; // Process 200 lines at a time
+                const results = [];
+                
+                // Parse header to get indices
                 const parseLine = (line) => {
                     const result = [];
                     let start = 0;
@@ -1424,44 +1442,148 @@
                     result.push(line.substring(start));
                     return result.map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
                 };
+
+                if (total < 2) {
+                     onComplete([]);
+                     return;
+                }
+
                 const headers = parseLine(lines[0]);
                 const idIdx = headers.findIndex(h => h.includes("Tweet ID"));
                 const contentIdx = headers.findIndex(h => h.includes("Content"));
                 const dateIdx = headers.findIndex(h => h.includes("Posted At") || h.includes("Posted Date"));
                 const timeIdx = headers.findIndex(h => h.includes("Posted Time"));
-                const results = [];
-                for (let i = 1; i < lines.length; i++) {
-                    if (!lines[i].trim()) continue;
-                    try {
-                        const cols = parseLine(lines[i]);
-                        let dateStr = cols[dateIdx];
-                        if (dateStr && !dateStr.includes(":") && timeIdx !== -1) { dateStr += " " + cols[timeIdx]; }
-                        const dateObj = new Date(dateStr);
-                        if (!isNaN(dateObj)) {
-                            results.push({ id: cols[idIdx], content: cols[contentIdx], createdAt: dateObj.toISOString() });
-                        }
-                    } catch (e) {}
+
+                if (idIdx === -1 || contentIdx === -1 || dateIdx === -1) {
+                    setErrorMsg("CSV 格式錯誤: 缺少必要欄位 (Tweet ID, Content, Posted At)");
+                    onComplete([]);
+                    return;
                 }
-                return results;
+
+                const processChunk = () => {
+                    const end = Math.min(current + chunkSize, total);
+                    for (let i = current; i < end; i++) {
+                        if (!lines[i].trim()) continue;
+                        try {
+                            const cols = parseLine(lines[i]);
+                            let dateStr = cols[dateIdx];
+                            if (dateStr && !dateStr.includes(":") && timeIdx !== -1) { dateStr += " " + cols[timeIdx]; }
+                            const dateObj = new Date(dateStr);
+                            if (!isNaN(dateObj)) {
+                                results.push({ id: cols[idIdx], content: cols[contentIdx], createdAt: dateObj.toISOString() });
+                            }
+                        } catch (e) {
+                            console.warn("Skipping bad CSV line", i);
+                        }
+                    }
+                    current = end;
+                    
+                    if (current < total) {
+                        // Report progress via log (optional, but good for UX)
+                        if (current % 1000 === 0) addLog(`Processing CSV... ${(current/total*100).toFixed(0)}%`);
+                        setTimeout(processChunk, 0); // Yield to main thread
+                    } else {
+                        onComplete(results);
+                    }
+                };
+                
+                processChunk();
+            };
+
+            const calibrateAndMerge = (currentApiData, newCsvData) => {
+                addLog(`Merging... API: ${currentApiData.length}, CSV: ${newCsvData.length}`);
+                
+                // 1. Calibration (Find offset)
+                let timeOffset = 0;
+                let matched = false;
+                
+                // Sort API descending
+                const sortedApi = [...currentApiData].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                for (let apiPost of sortedApi) {
+                    // Try to find matching content in CSV
+                    // Trim content to avoid whitespace issues
+                    const match = newCsvData.find(c => c.content.trim() === apiPost.content.trim());
+                    if (match) {
+                        const apiTime = new Date(apiPost.createdAt).getTime();
+                        const csvTime = new Date(match.createdAt).getTime();
+                        timeOffset = apiTime - csvTime;
+                        addLog(`Time Calibration Offset: ${timeOffset}ms (${(timeOffset/60000).toFixed(1)} mins)`);
+                        matched = true;
+                        break; // Stop after first (latest) match
+                    }
+                }
+
+                if (!matched) {
+                    addLog("Warning: No matching content found for time calibration. Using raw CSV time.");
+                }
+
+                // 2. Apply Offset & Merge
+                const postMap = new Map();
+
+                // Add API posts first (Source of Truth)
+                currentApiData.forEach(p => postMap.set(p.id, p));
+
+                // Add calibrated CSV posts
+                newCsvData.forEach(p => {
+                    // Correct time
+                    let correctedTime = p.createdAt;
+                    if (matched && timeOffset !== 0) {
+                         correctedTime = new Date(new Date(p.createdAt).getTime() + timeOffset).toISOString();
+                    }
+                    
+                    const newPost = { ...p, createdAt: correctedTime };
+                    
+                    // Add only if ID doesn't exist (API priority)
+                    // If ID matches, we keep the API version (already in map)
+                    // If CSV has IDs not in API (older history), they get added.
+                    if (!postMap.has(newPost.id)) {
+                        postMap.set(newPost.id, newPost);
+                    }
+                });
+                
+                const finalPosts = Array.from(postMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                addLog(`Merge Complete. Total unique posts: ${finalPosts.length}`);
+                return finalPosts;
             };
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
+
+                addLog(`Reading CSV: ${file.name} (${(file.size/1024).toFixed(1)}KB)`);
+                setLoading(true); // Reuse loading state to show spinner
+
                 const reader = new FileReader();
                 reader.onload = (evt) => {
-                    try {
-                        const parsed = parseCSV(evt.target.result);
-                        if (parsed.length > 0) {
-                            processData(parsed);
-                            setDataSource(`CSV: ${file.name}`);
+                    const text = evt.target.result;
+                    
+                    // Use chunked parser
+                    parseCSVChunked(text, (parsedCsvData) => {
+                        if (parsedCsvData.length > 0) {
+                            // Perform merge with existing posts (which should be API data)
+                            const mergedData = calibrateAndMerge(posts, parsedCsvData);
+                            
+                            setPosts(mergedData);
+                            setDataSource(`Merged (API + ${file.name})`);
                             setShowControls(false);
                             setErrorMsg(null);
-                        } else { setErrorMsg("解析失敗"); }
-                    } catch (err) { setErrorMsg("檔案錯誤"); }
+                        } else {
+                            setErrorMsg("CSV 解析失敗或無有效資料");
+                            addLog("CSV parsing failed or empty.");
+                        }
+                        setLoading(false);
+                    });
                 };
+                
+                reader.onerror = () => {
+                    setErrorMsg("檔案讀取錯誤");
+                    setLoading(false);
+                };
+                
                 reader.readAsText(file);
             };
+            // --- CSV CHUNKED PARSING LOGIC END ---
 
             const simpleTranslate = (text) => {
                 if (!text) return "";
@@ -1580,24 +1702,6 @@
                     pos = Math.max(0, Math.min(100, pos));
                     const ratio = avg > 0 ? (current / avg) * 100 : (current > 0 ? 100 : 0);
                     
-                    const additional = hoursToTarget > 0 ? (parseFloat(current) / h * hoursToTarget) : 0;
-                    const totalProjected = (typeof specialCount === 'number' ? specialCount : 0) + additional;
-                    
-                    // Update ref for webhook for 12H (just an example, could loop all)
-                    if (h === 12) {
-                         const currentSpeed = (parseFloat(current) / h).toFixed(1);
-                         
-                         // Calculate 7D projection (using avg7d)
-                         // avg7d is avg count in 12H over last 7 days.
-                         // Speed 7d = avg7d / 12
-                         const speed7d = (parseFloat(realTimeComparison[h].avg7d) / 12);
-                         const projected7d = (typeof specialCount === 'number' ? specialCount : 0) + (speed7d * hoursToTarget);
-                         
-                         // We can't update state inside render/memo, but we can return values
-                         // Or use a useEffect to update the ref based on this memo result
-                         // To avoid complexity, let's just calc here and update ref in useEffect [velocityStats]
-                    }
-
                     res[h] = { 
                         current, 
                         avg: avg.toFixed(1), 
@@ -1614,27 +1718,7 @@
                     };
                 });
                 return res;
-            }, [historicalStats, realTimeComparison, hoursToTarget, specialCount]);
-
-            // UseEffect to update statsRef from velocityStats
-            useEffect(() => {
-                if (velocityStats[12] && realTimeComparison[12]) {
-                    const v12 = velocityStats[12];
-                    const r12 = realTimeComparison[12];
-                    const currentSpeed = (parseFloat(v12.current) / 12).toFixed(1);
-                    const totalProjected = (typeof specialCount === 'number' ? specialCount : 0) + (parseFloat(currentSpeed) * hoursToTarget);
-                    
-                    const speed7d = (parseFloat(r12.avg7d) / 12);
-                    const projected7d = (typeof specialCount === 'number' ? specialCount : 0) + (speed7d * hoursToTarget);
-
-                    setStatsRef(prev => ({
-                        ...prev,
-                        velocity12H: currentSpeed,
-                        projectedCurrent: totalProjected.toFixed(0),
-                        projected7Day: projected7d.toFixed(0)
-                    }));
-                }
-            }, [velocityStats, realTimeComparison, hoursToTarget, specialCount]);
+            }, [historicalStats, realTimeComparison]);
 
             // Calculate Last Long Silence > 3h
             const lastLongSilence = useMemo(() => {
