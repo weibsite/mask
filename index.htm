@@ -1406,7 +1406,7 @@
                                 setTimeout(() => setIsNewPost(false), 2000); 
                                 addLog("New post detected! Refreshing...");
                                 const s = statsRef; 
-                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值A,B,C${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
+                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}    速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
                                 fetchFromApi(); 
                             }
