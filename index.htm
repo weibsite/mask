@@ -208,10 +208,23 @@
         const PieChart = (props) => <IconBase {...props} path={<g><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></g>} />;
         const Send = (props) => <IconBase {...props} path={<g><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></g>} />;
 
-        // --- Define format helpers globally ---
+        // --- Helper Functions (Moved outside App) ---
         const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
         const formatDateET = (date) => date.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' });
         const formatWeekdayET = (date) => date.toLocaleDateString('zh-TW', { timeZone: 'America/New_York', weekday: 'short' });
+        
+        const simpleTranslate = (text) => {
+            if (!text) return "";
+            let t = text;
+            t = t.replace(/RT /g, "【轉推】");
+            t = t.replace(/Space/gi, "太空");
+            t = t.replace(/Mars/gi, "火星");
+            t = t.replace(/crypto/gi, "加密貨幣");
+            t = t.replace(/doge/gi, "狗狗幣");
+            t = t.replace(/AI/g, "人工智慧");
+            t = t.replace(/future/gi, "未來");
+            return t;
+        };
 
         // --- Components ---
         const SilenceProbBadge = ({ label, prob }) => {
@@ -444,97 +457,6 @@
                 </div>
             )
         };
-        
-        // --- New Historical Range Stats Component ---
-        const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
-            const [stats, setStats] = useState([]);
-
-            useEffect(() => {
-                if (!posts.length) return;
-                
-                // Known Cycle Starts (Date Strings)
-                const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
-                const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
-
-                const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
-                
-                const cycleCounts = [];
-                
-                targetCycles.forEach(dateStr => {
-                    const parts = dateStr.split('/');
-                    const y = parseInt(parts[0]);
-                    const m = parseInt(parts[1]) - 1;
-                    const d = parseInt(parts[2]);
-                    
-                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
-                    const startMs = Date.UTC(y, m, d, 17, 0, 0); 
-                    const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
-                    
-                    const count = posts.filter(p => {
-                        const t = new Date(p.createdAt).getTime();
-                        return t >= startMs && t < endMs;
-                    }).length;
-                    
-                    cycleCounts.push(count);
-                });
-                
-                const totalCycles = cycleCounts.length;
-                if (totalCycles === 0) return;
-
-                const bucketCounts = {};
-                cycleCounts.forEach(val => {
-                    const bucketIdx = Math.floor(val / 20);
-                    bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
-                });
-                
-                const results = [];
-                const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
-                
-                for(let i=0; i<=maxBucketIdx; i++) {
-                    if (bucketCounts[i]) {
-                        const count = bucketCounts[i];
-                        const prob = (count / totalCycles) * 100;
-                        results.push({
-                            range: `${i*20}~${i*20+19}`,
-                            count: count,
-                            prob: prob.toFixed(1)
-                        });
-                    }
-                }
-                
-                results.sort((a,b) => {
-                    const startA = parseInt(a.range.split('~')[0]);
-                    const startB = parseInt(b.range.split('~')[0]);
-                    return startA - startB;
-                });
-
-                setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
-
-            }, [posts, activeCycleType]);
-
-            if (!stats || !stats.data || stats.data.length === 0) return null;
-
-            return (
-                <div className="mobile-card p-4 mt-4">
-                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center justify-between">
-                        <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史週期分佈 ({stats.type})</div>
-                        <div className="text-[9px] text-gray-600">樣本: {stats.totalCycles} 週</div>
-                    </h3>
-                    <div className="grid grid-cols-4 gap-2">
-                        {stats.data.map((item, idx) => (
-                            <div key={idx} className="bg-gray-900/50 rounded p-2 text-center border border-gray-800">
-                                <div className="text-[10px] text-gray-400">{item.range}</div>
-                                <div className="flex items-baseline justify-center space-x-1">
-                                    <span className="text-sm font-bold text-white">{item.count}</span>
-                                    <span className="text-[9px] text-gray-500 font-mono">({item.prob}%)</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        };
-
 
         const RangeProbabilities = ({ posts, currentCount, hoursToTarget, setStatsRef }) => {
             const [probs, setProbs] = useState([]);
@@ -1051,7 +973,98 @@
             );
         };
 
+        // --- New Historical Range Stats Component ---
+        const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
+            const [stats, setStats] = useState([]);
+
+            useEffect(() => {
+                if (!posts.length) return;
+                
+                // Known Cycle Starts (Date Strings)
+                const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
+                const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
+
+                const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
+                
+                const cycleCounts = [];
+                
+                targetCycles.forEach(dateStr => {
+                    const parts = dateStr.split('/');
+                    const y = parseInt(parts[0]);
+                    const m = parseInt(parts[1]) - 1;
+                    const d = parseInt(parts[2]);
+                    
+                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
+                    const startMs = Date.UTC(y, m, d, 17, 0, 0); 
+                    const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
+                    
+                    const count = posts.filter(p => {
+                        const t = new Date(p.createdAt).getTime();
+                        return t >= startMs && t < endMs;
+                    }).length;
+                    
+                    cycleCounts.push(count);
+                });
+                
+                const totalCycles = cycleCounts.length;
+                if (totalCycles === 0) return;
+
+                const bucketCounts = {};
+                cycleCounts.forEach(val => {
+                    const bucketIdx = Math.floor(val / 20);
+                    bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
+                });
+                
+                const results = [];
+                const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
+                
+                for(let i=0; i<=maxBucketIdx; i++) {
+                    if (bucketCounts[i]) {
+                        const count = bucketCounts[i];
+                        const prob = (count / totalCycles) * 100;
+                        results.push({
+                            range: `${i*20}~${i*20+19}`,
+                            count: count,
+                            prob: prob.toFixed(1)
+                        });
+                    }
+                }
+                
+                results.sort((a,b) => {
+                    const startA = parseInt(a.range.split('~')[0]);
+                    const startB = parseInt(b.range.split('~')[0]);
+                    return startA - startB;
+                });
+
+                setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
+
+            }, [posts, activeCycleType]);
+
+            if (!stats || !stats.data || stats.data.length === 0) return null;
+
+            return (
+                <div className="mobile-card p-4 mt-4">
+                    <h3 className="text-xs text-gray-500 uppercase mb-2 flex items-center justify-between">
+                        <div className="flex items-center"><History className="w-3 h-3 mr-1" /> 歷史週期分佈 ({stats.type})</div>
+                        <div className="text-[9px] text-gray-600">樣本: {stats.totalCycles} 週</div>
+                    </h3>
+                    <div className="grid grid-cols-4 gap-2">
+                        {stats.data.map((item, idx) => (
+                            <div key={idx} className="bg-gray-900/50 rounded p-2 text-center border border-gray-800">
+                                <div className="text-[10px] text-gray-400">{item.range}</div>
+                                <div className="flex items-baseline justify-center space-x-1">
+                                    <span className="text-sm font-bold text-white">{item.count}</span>
+                                    <span className="text-[9px] text-gray-500 font-mono">({item.prob}%)</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
         const App = () => {
+            // ... (App state and other hooks) ...
             // --- State ---
             const [posts, setPosts] = useState([]);
             const [userInfo, setUserInfo] = useState(null);
@@ -1192,6 +1205,17 @@
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
             }, [activeCycleType]);
 
+            // --- CRITICAL FIX: Define hoursSinceLast HERE ---
+            // It MUST be defined before any hook that uses it (rtStats, etc.)
+            let hoursSinceLast = 0;
+            const lastPost = posts.length > 0 ? posts[0] : null;
+            const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
+            if (lastPostTime) {
+                const diffMs = new Date() - lastPostTime;
+                hoursSinceLast = diffMs / (1000 * 60 * 60);
+            }
+            // ------------------------------------------------
+
             useEffect(() => {
                 const timer = setInterval(() => {
                     const now = new Date();
@@ -1301,8 +1325,6 @@
                 setLoading(true);
                 addLog(`Starting Main API Fetch... (Attempt ${retryAttempt + 1})`);
                 const corsURL = 'https://corsproxy.io/?'; 
-                
-                // 20s Timeout Controller
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 20000);
 
@@ -1315,7 +1337,7 @@
                     
                     addLog("Requesting history (90d)...");
                     const postsRes = await fetch(postsUrl, { signal: controller.signal });
-                    clearTimeout(timeoutId); // Clear timeout on success
+                    clearTimeout(timeoutId);
 
                     if (!postsRes.ok) {
                          addLog(`Main API Error: ${postsRes.status}`);
@@ -1347,19 +1369,17 @@
                 } catch (err) {
                     clearTimeout(timeoutId);
                     console.error("Main fetch failed:", err);
-                    
                     if (err.name === 'AbortError') {
                         addLog("Timeout (20s) reached.");
                         addLog("Retrying in 1s...");
                         setTimeout(() => fetchFromApi(retryAttempt + 1), 1000);
-                        return; // Exit to prevent setting loading false/showing controls prematurely
+                        return; 
                     } else {
                         addLog(`Error: ${err.message}`);
                         setErrorMsg(`${err.message}`);
                         setShowControls(true); 
                     }
                 } finally {
-                    // Only unset loading if not retrying immediately (handled by return above for timeouts)
                     setLoading(false);
                 }
             }, []);
@@ -1385,11 +1405,9 @@
                                 setIsNewPost(true);
                                 setTimeout(() => setIsNewPost(false), 2000); 
                                 addLog("New post detected! Refreshing...");
-                                
-                                // Trigger Webhook
-                                const msg = `偵測到發文數更新!目前發文數: ${newCount}`;
+                                const s = statsRef; 
+                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值A,B,C${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
-                                
                                 fetchFromApi(); 
                             }
                             prevSpecialCountRef.current = newCount;
@@ -1403,7 +1421,7 @@
                     setLoadingSpecial(false); 
                     isFetchingSpecialRef.current = false; 
                 }
-            }, [fetchFromApi, webhookUrl, statsRef]); // Added statsRef to dependencies
+            }, [fetchFromApi, webhookUrl, statsRef]); 
 
             useEffect(() => {
                 addLog("System Init...");
@@ -1420,17 +1438,14 @@
                 setLastUpdated(new Date());
             };
 
-            // ... (App render content omitted to fit response, but includes RangeProbabilities) ...
-            
-            // --- CSV CHUNKED PARSING LOGIC START ---
+            // ... (CSV Parsing Logic - same as above) ...
             const parseCSVChunked = (text, onComplete) => {
                 const lines = text.split(/\r?\n/);
                 const total = lines.length;
-                let current = 1; // skip header (index 0 is header)
-                const chunkSize = 200; // Process 200 lines at a time
+                let current = 1; 
+                const chunkSize = 200; 
                 const results = [];
                 
-                // Parse header to get indices
                 const parseLine = (line) => {
                     const result = [];
                     let start = 0;
@@ -1443,19 +1458,25 @@
                     return result.map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
                 };
 
-                if (total < 2) {
-                     onComplete([]);
-                     return;
-                }
+                if (total < 2) { onComplete([]); return; }
 
                 const headers = parseLine(lines[0]);
                 const idIdx = headers.findIndex(h => h.includes("Tweet ID"));
-                const contentIdx = headers.findIndex(h => h.includes("Content"));
+                const contentIdx = headers.findIndex(h => h.includes("Content") || h.toLowerCase() === 'content');
                 const dateIdx = headers.findIndex(h => h.includes("Posted At") || h.includes("Posted Date"));
                 const timeIdx = headers.findIndex(h => h.includes("Posted Time"));
+                const fullTimeIdx = headers.findIndex(h => h.includes("TIME"));
 
-                if (idIdx === -1 || contentIdx === -1 || dateIdx === -1) {
-                    setErrorMsg("CSV 格式錯誤: 缺少必要欄位 (Tweet ID, Content, Posted At)");
+                if (contentIdx === -1) {
+                     setErrorMsg("CSV 格式錯誤: 找不到 Content 欄位");
+                     onComplete([]);
+                     return;
+                }
+                
+                // Allow missing ID (auto-generate)
+                // Require Date (either Posted At or TIME)
+                if (dateIdx === -1 && fullTimeIdx === -1) {
+                    setErrorMsg("CSV 格式錯誤: 缺少時間欄位");
                     onComplete([]);
                     return;
                 }
@@ -1466,43 +1487,49 @@
                         if (!lines[i].trim()) continue;
                         try {
                             const cols = parseLine(lines[i]);
-                            let dateStr = cols[dateIdx];
-                            if (dateStr && !dateStr.includes(":") && timeIdx !== -1) { dateStr += " " + cols[timeIdx]; }
+                            let dateStr = "";
+                            
+                            // Try TIME first
+                            if (fullTimeIdx !== -1 && cols[fullTimeIdx]) {
+                                dateStr = cols[fullTimeIdx];
+                            } else if (dateIdx !== -1) {
+                                dateStr = cols[dateIdx];
+                                if (dateStr && !dateStr.includes(":") && timeIdx !== -1) { 
+                                    dateStr += " " + cols[timeIdx]; 
+                                }
+                            }
+                            
                             const dateObj = new Date(dateStr);
-                            if (!isNaN(dateObj)) {
-                                results.push({ id: cols[idIdx], content: cols[contentIdx], createdAt: dateObj.toISOString() });
+                            const content = cols[contentIdx];
+                            
+                            // Generate ID if missing
+                            const id = (idIdx !== -1 && cols[idIdx]) ? cols[idIdx] : `csv-${i}-${Date.now()}`;
+
+                            if (!isNaN(dateObj) && content) {
+                                results.push({ id, content, createdAt: dateObj.toISOString() });
                             }
                         } catch (e) {
                             console.warn("Skipping bad CSV line", i);
                         }
                     }
                     current = end;
-                    
                     if (current < total) {
-                        // Report progress via log (optional, but good for UX)
                         if (current % 1000 === 0) addLog(`Processing CSV... ${(current/total*100).toFixed(0)}%`);
-                        setTimeout(processChunk, 0); // Yield to main thread
+                        setTimeout(processChunk, 0); 
                     } else {
                         onComplete(results);
                     }
                 };
-                
                 processChunk();
             };
 
             const calibrateAndMerge = (currentApiData, newCsvData) => {
                 addLog(`Merging... API: ${currentApiData.length}, CSV: ${newCsvData.length}`);
-                
-                // 1. Calibration (Find offset)
                 let timeOffset = 0;
                 let matched = false;
-                
-                // Sort API descending
                 const sortedApi = [...currentApiData].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
                 
                 for (let apiPost of sortedApi) {
-                    // Try to find matching content in CSV
-                    // Trim content to avoid whitespace issues
                     const match = newCsvData.find(c => c.content.trim() === apiPost.content.trim());
                     if (match) {
                         const apiTime = new Date(apiPost.createdAt).getTime();
@@ -1510,80 +1537,54 @@
                         timeOffset = apiTime - csvTime;
                         addLog(`Time Calibration Offset: ${timeOffset}ms (${(timeOffset/60000).toFixed(1)} mins)`);
                         matched = true;
-                        break; // Stop after first (latest) match
+                        break; 
                     }
                 }
+                if (!matched) addLog("Warning: No matching content found for calibration.");
 
-                if (!matched) {
-                    addLog("Warning: No matching content found for time calibration. Using raw CSV time.");
-                }
-
-                // 2. Apply Offset & Merge
                 const postMap = new Map();
-
-                // Add API posts first (Source of Truth)
                 currentApiData.forEach(p => postMap.set(p.id, p));
-
-                // Add calibrated CSV posts
                 newCsvData.forEach(p => {
-                    // Correct time
                     let correctedTime = p.createdAt;
                     if (matched && timeOffset !== 0) {
                          correctedTime = new Date(new Date(p.createdAt).getTime() + timeOffset).toISOString();
                     }
-                    
                     const newPost = { ...p, createdAt: correctedTime };
-                    
-                    // Add only if ID doesn't exist (API priority)
-                    // If ID matches, we keep the API version (already in map)
-                    // If CSV has IDs not in API (older history), they get added.
                     if (!postMap.has(newPost.id)) {
                         postMap.set(newPost.id, newPost);
                     }
                 });
                 
                 const finalPosts = Array.from(postMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                addLog(`Merge Complete. Total unique posts: ${finalPosts.length}`);
+                addLog(`Merge Complete. Total: ${finalPosts.length}`);
                 return finalPosts;
             };
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-
-                addLog(`Reading CSV: ${file.name} (${(file.size/1024).toFixed(1)}KB)`);
-                setLoading(true); // Reuse loading state to show spinner
-
+                addLog(`Reading CSV: ${file.name}`);
+                setLoading(true); 
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     const text = evt.target.result;
-                    
-                    // Use chunked parser
                     parseCSVChunked(text, (parsedCsvData) => {
                         if (parsedCsvData.length > 0) {
-                            // Perform merge with existing posts (which should be API data)
                             const mergedData = calibrateAndMerge(posts, parsedCsvData);
-                            
                             setPosts(mergedData);
                             setDataSource(`Merged (API + ${file.name})`);
                             setShowControls(false);
                             setErrorMsg(null);
                         } else {
-                            setErrorMsg("CSV 解析失敗或無有效資料");
-                            addLog("CSV parsing failed or empty.");
+                            setErrorMsg("CSV 解析失敗");
+                            addLog("CSV parsing failed.");
                         }
                         setLoading(false);
                     });
                 };
-                
-                reader.onerror = () => {
-                    setErrorMsg("檔案讀取錯誤");
-                    setLoading(false);
-                };
-                
+                reader.onerror = () => { setErrorMsg("檔案讀取錯誤"); setLoading(false); };
                 reader.readAsText(file);
             };
-            // --- CSV CHUNKED PARSING LOGIC END ---
 
             const simpleTranslate = (text) => {
                 if (!text) return "";
@@ -1597,15 +1598,6 @@
                 t = t.replace(/future/gi, "未來");
                 return t;
             };
-
-            // Added logic for hoursSinceLast
-            let hoursSinceLast = 0;
-            const lastPost = posts.length > 0 ? posts[0] : null;
-            const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
-            if (lastPostTime) {
-                const diffMs = new Date() - lastPostTime;
-                hoursSinceLast = diffMs / (1000 * 60 * 60);
-            }
 
             const rtStats = useMemo(() => {
                 if (posts.length === 0) return { rt: 0, original: 0, rtPercent: 0, total: 0 };
@@ -1624,21 +1616,14 @@
                 const windows = [1, 6, 12, 24, 48, 72, 96, 120, 144, 168]; 
                 const res = {};
                 const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a, b) => a - b);
-                
                 const start = timestamps[0];
                 const end = timestamps[timestamps.length - 1]; 
-
                 windows.forEach(win => {
                     const winMs = win * 60 * 60 * 1000;
                     let max = 0, min = Infinity, sum = 0, samples = 0;
-                    let maxTime = null;
-                    let minTime = null;
-                    
-                    let minCount = 0;
-                    let maxCount = 0;
-
+                    let maxTime = null; let minTime = null;
+                    let minCount = 0; let maxCount = 0;
                     const searchLimit = end - winMs;
-
                     for (let t = start; t <= searchLimit; t += 3600000) {
                         const count = timestamps.filter(ts => ts >= t && ts < t + winMs).length;
                         if (count > max) { max = count; maxTime = t; }
@@ -1647,20 +1632,14 @@
                         samples++;
                     }
                     if (min === Infinity) { min = 0; minTime = start; }
-
                      for (let t = start; t <= searchLimit; t += 3600000) {
                         const count = timestamps.filter(ts => ts >= t && ts < t + winMs).length;
                         if (count === min) minCount++;
                         if (count === max) maxCount++;
                     }
-
                     res[win] = { 
                         avg: samples > 0 ? sum / samples : 0, 
-                        max, 
-                        min, 
-                        maxTime, 
-                        minTime, 
-                        samples, 
+                        max, min, maxTime, minTime, samples, 
                         totalSum: sum,
                         minFreq: samples > 0 ? ((minCount / samples) * 100).toFixed(0) : 0,
                         maxFreq: samples > 0 ? ((maxCount / samples) * 100).toFixed(0) : 0
@@ -1720,7 +1699,6 @@
                 return res;
             }, [historicalStats, realTimeComparison]);
 
-            // Calculate Last Long Silence > 3h
             const lastLongSilence = useMemo(() => {
                 if (posts.length < 2) return null;
                 const now = new Date();
@@ -1733,13 +1711,11 @@
                     
                     if (diffHours > 3) {
                          const endedAgo = (now - currentPostTime) / 3600000;
-                         
                          const fmt = (d) => d.toLocaleDateString('en-US', {
                             timeZone: 'America/New_York', month:'numeric', day:'numeric'
                          }) + ' ' + d.toLocaleTimeString('en-US', {
                             timeZone: 'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'
                          });
-
                          return {
                              endedAgo: endedAgo.toFixed(1),
                              duration: diffHours.toFixed(1),
