@@ -1876,10 +1876,25 @@
                                         {loading ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : "重試連線"}
                                     </button>
                                     <button 
-                                        onClick={() => {
-                                            requestNotificationPermission();
+                                        onClick={async () => {
                                             playAlarm();
+                                            if (!("Notification" in window)) {
+                                                addLog("此瀏覽器不支援通知");
+                                                return;
+                                            }
+                                            
+                                            // Check and request permission
+                                            if (Notification.permission !== "granted") {
+                                                addLog("正在請求通知權限...");
+                                                const permission = await Notification.requestPermission();
+                                                if (permission !== "granted") {
+                                                    addLog("通知權限被拒絕");
+                                                    return;
+                                                }
+                                            }
+                                            
                                             sendSystemNotification(specialCount || 0, (statsRef.velocity24h || "0.0") + "/h");
+                                            addLog("已發送測試通知");
                                         }} 
                                         className="w-full bg-emerald-900/30 text-emerald-400 border border-emerald-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2"
                                     >
