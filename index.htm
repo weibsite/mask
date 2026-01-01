@@ -1182,6 +1182,7 @@
 
                 try {
                     const url = `https://translation.googleapis.com/language/translate/v2?key=${googleApiKey}`;
+                    // Use direct fetch, no proxy
                     const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1208,6 +1209,9 @@
 
                 } catch (error) {
                     addLog(`翻譯失敗: ${error.message}`);
+                    if (error.message.includes('referer') || error.message.includes('CORS')) {
+                         addLog("請檢查 Google API Key 限制 (HTTP Referrer)");
+                    }
                     console.error("Google Translate Error:", error);
                 }
             }, [googleApiKey, googleTranslations]);
