@@ -171,6 +171,17 @@
             margin-left: 2px;
         }
         @keyframes blink { 50% { opacity: 0; } }
+        /* Keyword Highlight */
+        .kw-accelerate {
+            color: #ef4444; /* Red */
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(239, 68, 68, 0.4);
+        }
+        .kw-decelerate {
+            color: #10b981; /* Green */
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(16, 185, 129, 0.4);
+        }
     </style>
 </head>
 <body>
@@ -209,12 +220,56 @@
         const Send = (props) => <IconBase {...props} path={<g><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></g>} />;
         const Bell = (props) => <IconBase {...props} path={<g><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></g>} />;
         const Languages = (props) => <IconBase {...props} path={<g><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></g>} />;
+        const Cpu = (props) => <IconBase {...props} path={<g><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></g>} />;
 
         // --- Helper Functions (Moved outside App) ---
         const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
         const formatDateET = (date) => date.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric' });
         const formatWeekdayET = (date) => date.toLocaleDateString('zh-TW', { timeZone: 'America/New_York', weekday: 'short' });
         
+        // Highlight Helper
+        const highlightContent = (text, accelerators, decelerators) => {
+            if (!text) return null;
+            if ((!accelerators || accelerators.length === 0) && (!decelerators || decelerators.length === 0)) return text;
+
+            // Simple replace logic - could be optimized with Regex
+            let parts = [text];
+            
+            // Function to split and wrap matches
+            const processKeywords = (currentParts, keywords, className) => {
+                let newParts = [];
+                currentParts.forEach(part => {
+                    if (typeof part !== 'string') {
+                        newParts.push(part);
+                        return;
+                    }
+                    
+                    let regexStr = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+                    if(!regexStr) {
+                        newParts.push(part);
+                        return;
+                    }
+                    
+                    let regex = new RegExp(`(${regexStr})`, 'gi');
+                    let split = part.split(regex);
+                    
+                    split.forEach(s => {
+                        if (keywords.some(k => k.toLowerCase() === s.toLowerCase())) {
+                            newParts.push(<span key={Math.random()} className={className}>{s}</span>);
+                        } else {
+                            newParts.push(s);
+                        }
+                    });
+                });
+                return newParts;
+            };
+
+            if (accelerators && accelerators.length > 0) parts = processKeywords(parts, accelerators, "kw-accelerate");
+            if (decelerators && decelerators.length > 0) parts = processKeywords(parts, decelerators, "kw-decelerate");
+
+            return parts;
+        };
+
         const simpleTranslate = (text) => {
             if (!text) return "";
             let t = text;
@@ -1083,9 +1138,18 @@
             
             // Google Translation State
             const [googleApiKey, setGoogleApiKey] = useState(() => {
-                return localStorage.getItem('elon_tactical_google_key') || "";
+                return localStorage.getItem('elon_tactical_google_key') || "AIzaSyDzecRAm37ySFjU7QDAAcihyJSwxSGvBAM";
             });
             const [googleTranslations, setGoogleTranslations] = useState({}); // Map: { postId: translatedText }
+
+            // LM Studio / Local AI State
+            const [aiConfig, setAiConfig] = useState(() => {
+                const saved = localStorage.getItem('elon_tactical_ai_config');
+                return saved ? JSON.parse(saved) : { url: '/api/llm/v1', model: 'local-model' };
+            });
+            const [aiResult, setAiResult] = useState(null); // { summary, trend, keywords... }
+            const [acceleratorKeywords, setAcceleratorKeywords] = useState([]);
+            const [deceleratorKeywords, setDeceleratorKeywords] = useState([]);
 
             // Webhook State
             const [webhookUrl, setWebhookUrl] = useState(() => {
@@ -1106,26 +1170,17 @@
                 rangeProbs: ""
             });
 
-            // Update localStorage when URL changes
-            useEffect(() => {
-                localStorage.setItem('elon_tactical_webhook', webhookUrl);
-            }, [webhookUrl]);
-
-            // Update localStorage when API Key changes
-            useEffect(() => {
-                localStorage.setItem('elon_tactical_google_key', googleApiKey);
-            }, [googleApiKey]);
+            // Update localStorage
+            useEffect(() => { localStorage.setItem('elon_tactical_webhook', webhookUrl); }, [webhookUrl]);
+            useEffect(() => { localStorage.setItem('elon_tactical_google_key', googleApiKey); }, [googleApiKey]);
+            useEffect(() => { localStorage.setItem('elon_tactical_ai_config', JSON.stringify(aiConfig)); }, [aiConfig]);
 
             // Audio & Notification Logic
             const playAlarm = useCallback(() => {
                 try {
                     const audio = new Audio('Alarm02.wav');
-                    audio.play().catch(() => { 
-                        // Ignore auto-play policy errors or file not found
-                    });
-                } catch (e) {
-                    // Ignore construction errors
-                }
+                    audio.play().catch(() => { });
+                } catch (e) { }
             }, []);
 
             const requestNotificationPermission = useCallback(() => {
@@ -1142,26 +1197,20 @@
                         const title = "Elon Mobile Tactical";
                         const body = `發文數更新:目前發文數 ${currentCount}, 目前1天平均速率為: ${rate24h}`;
                         new Notification(title, { body, icon: 'https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png' });
-                    } catch (e) {
-                        console.error("Notification error", e);
-                    }
+                    } catch (e) { console.error("Notification error", e); }
                 }
             }, []);
 
             // Webhook sender function
             const sendWebhook = async (message) => {
                 if (!webhookUrl) return;
-                
                 addLog(`發送 Webhook: ${message}`);
-                
                 let requestOptions = {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 };
-
                 let fetchUrl = webhookUrl;
-
                 if (webhookUrl.includes("discord.com")) {
                     requestOptions.body = JSON.stringify({ content: message });
                 } else if (webhookUrl.includes("script.google.com")) {
@@ -1171,7 +1220,6 @@
                 } else {
                     requestOptions.body = JSON.stringify({ message: message, text: message });
                 }
-
                 try {
                     await fetch(fetchUrl, requestOptions);
                     addLog("Webhook 發送成功");
@@ -1215,9 +1263,7 @@
                     const url = `https://translation.googleapis.com/language/translate/v2?key=${googleApiKey}`;
                     const response = await fetch(url, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             q: targets.map(p => p.content),
                             target: 'zh-TW',
@@ -1244,6 +1290,85 @@
                     console.error("Google Translate Error:", error);
                 }
             }, [googleApiKey, googleTranslations]);
+
+            // NEW: Local AI Analysis Logic
+            const analyzePostsWithLocalAI = useCallback(async (currentPosts) => {
+                if (!aiConfig.url || currentPosts.length === 0) return;
+                addLog("正在呼叫本地 AI 分析貼文變化...");
+
+                const recentPostsText = currentPosts.slice(0, 20).map(p => 
+                    `[${new Date(p.createdAt).toLocaleString()}] ${p.content}`
+                ).join("\n");
+
+                const prompt = `
+                Analyze the following recent 20 tweets from Elon Musk.
+                Based on the content, tone, and frequency:
+                1. Predict future posting behavior (accelerate, decelerate, sustain).
+                2. Analyze psychological state changes.
+                3. Identify specific KEYWORDS in these tweets that indicate high interest (accelerators) or lack of interest/distraction (decelerators).
+                
+                Return ONLY a JSON object with this structure:
+                {
+                    "summary": "Short analysis of prediction and psychology (in Traditional Chinese)",
+                    "trend": "accelerate" | "decelerate" | "sustain",
+                    "accelerator_keywords": ["keyword1", "keyword2"],
+                    "decelerator_keywords": ["keyword3", "keyword4"]
+                }
+
+                Tweets:
+                ${recentPostsText}
+                `;
+
+                try {
+                    // Try to construct URL. If user provided relative path, use as is. 
+                    // If user provided full URL, use it.
+                    let apiUrl = aiConfig.url;
+                    // Standardize chat completion endpoint if user just gave base
+                    if (!apiUrl.includes('/chat/completions')) {
+                        apiUrl = apiUrl.replace(/\/+$/, '') + '/chat/completions';
+                    }
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: aiConfig.model,
+                            messages: [
+                                { role: "system", content: "You are an expert analyst of Elon Musk's social media behavior." },
+                                { role: "user", content: prompt }
+                            ],
+                            temperature: 0.7,
+                            max_tokens: 800
+                        })
+                    });
+
+                    if (!response.ok) throw new Error(`AI API Error: ${response.status}`);
+
+                    const data = await response.json();
+                    const content = data.choices[0]?.message?.content;
+                    
+                    if (content) {
+                        // Extract JSON from markdown code blocks if present
+                        let jsonStr = content;
+                        if (content.includes("```json")) {
+                            jsonStr = content.split("```json")[1].split("```")[0];
+                        } else if (content.includes("```")) {
+                            jsonStr = content.split("```")[1].split("```")[0];
+                        }
+                        
+                        const result = JSON.parse(jsonStr.trim());
+                        setAiResult(result);
+                        setAcceleratorKeywords(result.accelerator_keywords || []);
+                        setDeceleratorKeywords(result.decelerator_keywords || []);
+                        addLog("AI 分析完成與整理。");
+                    }
+
+                } catch (e) {
+                    addLog(`AI 分析失敗: ${e.message}`);
+                    console.error(e);
+                }
+
+            }, [aiConfig]);
 
             const targetDate = useMemo(() => {
                 const now = new Date(); 
@@ -1297,7 +1422,6 @@
             }, [activeCycleType]);
 
             // --- CRITICAL FIX: Define hoursSinceLast HERE ---
-            // It MUST be defined before any hook that uses it (rtStats, etc.)
             let hoursSinceLast = 0;
             const lastPost = posts.length > 0 ? posts[0] : null;
             const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
@@ -1412,7 +1536,7 @@
                 }
             }, [posts, parsedHours, specialCount]);
 
-            const fetchFromApi = useCallback(async (retryAttempt = 0) => {
+            const fetchFromApi = useCallback(async (retryAttempt = 0, shouldAnalyzeAI = false) => {
                 setLoading(true);
                 addLog(`Starting Main API Fetch... (Attempt ${retryAttempt + 1})`);
                 const corsURL = 'https://corsproxy.io/?'; 
@@ -1440,11 +1564,19 @@
                     addLog(`Received ${postsData.length} posts.`);
 
                     if (Array.isArray(postsData) && postsData.length > 0) {
-                        processData(postsData);
+                        const sorted = [...postsData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                        setPosts(sorted);
+                        setLastUpdated(new Date());
                         setDataSource("Live API (90 Days)");
                         setShowControls(false); 
                         setErrorMsg(null);
                         addLog("Data processed successfully.");
+                        
+                        // ** Trigger AI Analysis if requested **
+                        if (shouldAnalyzeAI) {
+                            analyzePostsWithLocalAI(sorted);
+                        }
+
                         try {
                             const userTarget = "https://xtracker.polymarket.com/api/users/elonmusk";
                             const userRes = await fetch(`${corsURL}${encodeURIComponent(userTarget)}`);
@@ -1473,7 +1605,7 @@
                 } finally {
                     setLoading(false);
                 }
-            }, []);
+            }, [analyzePostsWithLocalAI]);
 
             const fetchSpecialData = useCallback(async () => {
                 if (isFetchingSpecialRef.current) return;
@@ -1505,7 +1637,9 @@
                                 const s = statsRef; 
                                 const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}    速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
-                                fetchFromApi(); 
+                                
+                                // ** Trigger Main Fetch AND AI Analysis **
+                                fetchFromApi(0, true); 
                             }
                             prevSpecialCountRef.current = newCount;
                             setSpecialCount(newCount);
@@ -1529,17 +1663,10 @@
 
             useEffect(() => { fetchFromApi(0); }, [fetchFromApi]);
 
-            const processData = (rawData) => {
-                const sorted = [...rawData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                setPosts(sorted);
-                setLastUpdated(new Date());
-            };
-
             // Trigger translation when posts update
             useEffect(() => {
                 if (posts.length > 0 && googleApiKey) {
                     const topPosts = posts.slice(0, visiblePostsCount);
-                    // Debounce slightly to avoid rapid calls
                     const timer = setTimeout(() => {
                         translatePostsBatch(topPosts);
                     }, 1000);
@@ -1547,14 +1674,13 @@
                 }
             }, [posts, googleApiKey, translatePostsBatch, visiblePostsCount]);
 
-            // ... (CSV Parsing Logic - same as above) ...
+            // ... (CSV Parsing Logic - unchanged) ...
             const parseCSVChunked = (text, onComplete) => {
                 const lines = text.split(/\r?\n/);
                 const total = lines.length;
                 let current = 1; 
                 const chunkSize = 200; 
                 const results = [];
-                
                 const parseLine = (line) => {
                     const result = [];
                     let start = 0;
@@ -1566,30 +1692,23 @@
                     result.push(line.substring(start));
                     return result.map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
                 };
-
                 if (total < 2) { onComplete([]); return; }
-
                 const headers = parseLine(lines[0]);
                 const idIdx = headers.findIndex(h => h.includes("Tweet ID"));
                 const contentIdx = headers.findIndex(h => h.includes("Content") || h.toLowerCase() === 'content');
                 const dateIdx = headers.findIndex(h => h.includes("Posted At") || h.includes("Posted Date"));
                 const timeIdx = headers.findIndex(h => h.includes("Posted Time"));
                 const fullTimeIdx = headers.findIndex(h => h.includes("TIME"));
-
                 if (contentIdx === -1) {
                      setErrorMsg("CSV 格式錯誤: 找不到 Content 欄位");
                      onComplete([]);
                      return;
                 }
-                
-                // Allow missing ID (auto-generate)
-                // Require Date (either Posted At or TIME)
                 if (dateIdx === -1 && fullTimeIdx === -1) {
                     setErrorMsg("CSV 格式錯誤: 缺少時間欄位");
                     onComplete([]);
                     return;
                 }
-
                 const processChunk = () => {
                     const end = Math.min(current + chunkSize, total);
                     for (let i = current; i < end; i++) {
@@ -1597,8 +1716,6 @@
                         try {
                             const cols = parseLine(lines[i]);
                             let dateStr = "";
-                            
-                            // Try TIME first
                             if (fullTimeIdx !== -1 && cols[fullTimeIdx]) {
                                 dateStr = cols[fullTimeIdx];
                             } else if (dateIdx !== -1) {
@@ -1607,13 +1724,9 @@
                                     dateStr += " " + cols[timeIdx]; 
                                 }
                             }
-                            
                             const dateObj = new Date(dateStr);
                             const content = cols[contentIdx];
-                            
-                            // Generate ID if missing
                             const id = (idIdx !== -1 && cols[idIdx]) ? cols[idIdx] : `csv-${i}-${Date.now()}`;
-
                             if (!isNaN(dateObj) && content) {
                                 results.push({ id, content, createdAt: dateObj.toISOString() });
                             }
@@ -1623,7 +1736,6 @@
                     }
                     current = end;
                     if (current < total) {
-                        if (current % 1000 === 0) addLog(`Processing CSV... ${(current/total*100).toFixed(0)}%`);
                         setTimeout(processChunk, 0); 
                     } else {
                         onComplete(results);
@@ -1633,24 +1745,19 @@
             };
 
             const calibrateAndMerge = (currentApiData, newCsvData) => {
-                addLog(`Merging... API: ${currentApiData.length}, CSV: ${newCsvData.length}`);
                 let timeOffset = 0;
                 let matched = false;
                 const sortedApi = [...currentApiData].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-                
                 for (let apiPost of sortedApi) {
                     const match = newCsvData.find(c => c.content.trim() === apiPost.content.trim());
                     if (match) {
                         const apiTime = new Date(apiPost.createdAt).getTime();
                         const csvTime = new Date(match.createdAt).getTime();
                         timeOffset = apiTime - csvTime;
-                        addLog(`Time Calibration Offset: ${timeOffset}ms (${(timeOffset/60000).toFixed(1)} mins)`);
                         matched = true;
                         break; 
                     }
                 }
-                if (!matched) addLog("Warning: No matching content found for calibration.");
-
                 const postMap = new Map();
                 currentApiData.forEach(p => postMap.set(p.id, p));
                 newCsvData.forEach(p => {
@@ -1663,16 +1770,13 @@
                         postMap.set(newPost.id, newPost);
                     }
                 });
-                
                 const finalPosts = Array.from(postMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                addLog(`Merge Complete. Total: ${finalPosts.length}`);
                 return finalPosts;
             };
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                addLog(`Reading CSV: ${file.name}`);
                 setLoading(true); 
                 const reader = new FileReader();
                 reader.onload = (evt) => {
@@ -1686,7 +1790,6 @@
                             setErrorMsg(null);
                         } else {
                             setErrorMsg("CSV 解析失敗");
-                            addLog("CSV parsing failed.");
                         }
                         setLoading(false);
                     });
@@ -1695,19 +1798,8 @@
                 reader.readAsText(file);
             };
 
-            const simpleTranslate = (text) => {
-                if (!text) return "";
-                let t = text;
-                t = t.replace(/RT /g, "【轉推】");
-                t = t.replace(/Space/gi, "太空");
-                t = t.replace(/Mars/gi, "火星");
-                t = t.replace(/crypto/gi, "加密貨幣");
-                t = t.replace(/doge/gi, "狗狗幣");
-                t = t.replace(/AI/g, "人工智慧");
-                t = t.replace(/future/gi, "未來");
-                return t;
-            };
-
+            // --- RE-ADDED MISSING STATS LOGIC ---
+            
             const rtStats = useMemo(() => {
                 if (posts.length === 0) return { rt: 0, original: 0, rtPercent: 0, total: 0 };
                 const now = new Date();
@@ -1808,7 +1900,6 @@
                 return res;
             }, [historicalStats, realTimeComparison]);
 
-            // NEW: Update statsRef with 24h velocity for notification
             useEffect(() => {
                 if (velocityStats && velocityStats[24]) {
                     const v24 = velocityStats[24];
@@ -1843,7 +1934,6 @@
                 }
                 return null;
             }, [posts, currentTime]);
-
 
             const tacticalData = useMemo(() => {
                 if (posts.length < 2) return null; 
@@ -1934,14 +2024,14 @@
                     </div>
 
                     {/* Controls */}
-                    <div className="bg-[#0a0a0a] border-b border-gray-900 transition-all duration-300 ease-in-out overflow-hidden" style={{maxHeight: showControls ? '400px' : '0', opacity: showControls ? 1 : 0}}>
+                    <div className="bg-[#0a0a0a] border-b border-gray-900 transition-all duration-300 ease-in-out overflow-hidden" style={{maxHeight: showControls ? '550px' : '0', opacity: showControls ? 1 : 0}}>
                         <div className="px-4 py-2 space-y-2">
                                 <div className="flex justify-between items-center text-xs text-red-400 mb-1">
                                     <span>⚠️ {errorMsg || "連線需注意"}</span>
                                     <button onClick={() => setShowControls(false)} className="text-gray-500">隱藏</button>
                                 </div>
                                 <div className="flex gap-2">
-                                     <button onClick={fetchFromApi} disabled={loading} className="w-full bg-sky-900/30 text-sky-400 border border-sky-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2">
+                                     <button onClick={() => fetchFromApi(0)} disabled={loading} className="w-full bg-sky-900/30 text-sky-400 border border-sky-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2">
                                         {loading ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : "重試連線"}
                                     </button>
                                     <button 
@@ -1951,8 +2041,6 @@
                                                 addLog("此瀏覽器不支援通知");
                                                 return;
                                             }
-                                            
-                                            // Check and request permission
                                             if (Notification.permission !== "granted") {
                                                 addLog("正在請求通知權限...");
                                                 const permission = await Notification.requestPermission();
@@ -1961,7 +2049,6 @@
                                                     return;
                                                 }
                                             }
-                                            
                                             sendSystemNotification(specialCount || 0, (statsRef.velocity24h || "0.0") + "/h");
                                             addLog("已發送測試通知");
                                         }} 
@@ -1984,6 +2071,34 @@
                                         className="bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 w-full focus:outline-none focus:border-emerald-500 mb-1" 
                                     />
                                     <div className="text-[9px] text-gray-600">填入 Key 後自動翻譯最新 10 篇貼文</div>
+                                </div>
+
+                                <div className="border-t border-gray-800 pt-2 mb-2">
+                                    <label className="block text-[10px] text-gray-500 mb-1 flex items-center">
+                                        <Cpu className="w-3 h-3 mr-1" /> 本地 AI 設定 (LM Studio)
+                                    </label>
+                                    <div className="flex gap-2 mb-1">
+                                        <input 
+                                            type="text" 
+                                            value={aiConfig.url}
+                                            onChange={(e) => setAiConfig(prev => ({...prev, url: e.target.value}))}
+                                            placeholder="API URL (/api/llm/v1)" 
+                                            className="bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 w-full focus:outline-none focus:border-emerald-500" 
+                                        />
+                                        <input 
+                                            type="text" 
+                                            value={aiConfig.model}
+                                            onChange={(e) => setAiConfig(prev => ({...prev, model: e.target.value}))}
+                                            placeholder="Model ID" 
+                                            className="bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 w-1/3 focus:outline-none focus:border-emerald-500" 
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={() => analyzePostsWithLocalAI(posts)}
+                                        className="w-full bg-gray-800 text-gray-300 border border-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-700 mt-1"
+                                    >
+                                        手動觸發 AI 分析
+                                    </button>
                                 </div>
 
                                 <div className="border-t border-gray-800 pt-2 mb-2">
@@ -2192,6 +2307,39 @@
                                     <div className="flex items-center"><MessageSquare className="w-3 h-3 mr-1" /> 最新發文 (Display {visiblePostsCount})</div>
                                 </h3>
                                 
+                                {aiResult && (
+                                    <div className="mb-4 bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-sm font-bold text-gray-200 flex items-center">
+                                                <Cpu className="w-4 h-4 mr-1 text-purple-400"/> AI 戰術分析
+                                            </h4>
+                                            <span className={`text-xs px-2 py-0.5 rounded border ${
+                                                aiResult.trend === 'accelerate' ? 'bg-red-900/30 text-red-400 border-red-800' : 
+                                                aiResult.trend === 'decelerate' ? 'bg-green-900/30 text-green-400 border-green-800' : 
+                                                'bg-gray-800 text-gray-400 border-gray-700'
+                                            }`}>
+                                                {aiResult.trend === 'accelerate' ? '趨勢：加速 ▲' : 
+                                                 aiResult.trend === 'decelerate' ? '趨勢：減速 ▼' : '趨勢：持平 -'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-400 leading-relaxed mb-2">{aiResult.summary}</p>
+                                        <div className="flex flex-wrap gap-2 text-[10px]">
+                                            {acceleratorKeywords.length > 0 && (
+                                                <div className="flex items-center">
+                                                    <span className="text-red-500 font-bold mr-1">加速詞:</span>
+                                                    {acceleratorKeywords.map(k => <span key={k} className="bg-red-900/20 text-red-300 px-1 rounded mr-1">{k}</span>)}
+                                                </div>
+                                            )}
+                                            {deceleratorKeywords.length > 0 && (
+                                                <div className="flex items-center">
+                                                    <span className="text-green-500 font-bold mr-1">冷卻詞:</span>
+                                                    {deceleratorKeywords.map(k => <span key={k} className="bg-green-900/20 text-green-300 px-1 rounded mr-1">{k}</span>)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {rtStats && (
                                     <div className="mb-3">
                                         <div className="flex justify-between text-[10px] text-gray-400 mb-1">
@@ -2222,9 +2370,11 @@
                                             </div>
                                             <p className="text-gray-300 text-xs leading-relaxed">
                                                 {googleTranslations[post.id] ? (
-                                                    <span className="animate-in fade-in text-gray-200">{googleTranslations[post.id]}</span>
+                                                    <span className="animate-in fade-in text-gray-200">
+                                                        {highlightContent(googleTranslations[post.id], acceleratorKeywords, deceleratorKeywords)}
+                                                    </span>
                                                 ) : (
-                                                    simpleTranslate(post.content) || <span className="italic text-gray-600">(純圖片/轉發)</span>
+                                                    highlightContent(simpleTranslate(post.content), acceleratorKeywords, deceleratorKeywords) || <span className="italic text-gray-600">(純圖片/轉發)</span>
                                                 )}
                                             </p>
                                         </div>
