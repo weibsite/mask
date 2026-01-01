@@ -1134,21 +1134,19 @@
             const [statsRef, setStatsRef] = useState({
                 predictionAvg: 0,
                 predictionConf: 0,
-                velocity12H: 0,
-                velocity24h: 0, 
+                // Removed redundant rate fields
                 projectedCurrent: 0,
                 projected7Day: 0,
                 heatmapMin: 0,
                 heatmapAvg: 0,
                 heatmapMax: 0,
-                rangeProbs: "",
-                rate1H: 0,
-                rate1D: 0,
-                rate2D: 0
+                rangeProbs: ""
             });
 
             // Ref to always access latest state in callbacks
             const latestStatsRef = useRef(statsRef);
+            // NEW: Ref to hold the latest velocity stats object directly
+            const latestVelocityStatsRef = useRef(null);
 
             useEffect(() => {
                 latestStatsRef.current = statsRef;
@@ -1573,11 +1571,16 @@
                                 addLog("New post detected! Refreshing...");
                                 
                                 playAlarm();
-                                const currentRate = latestStatsRef.current.velocity24h || "0.00";
+                                const vStats = latestVelocityStatsRef.current;
+                                const currentRate = vStats && vStats[24] ? (vStats[24].current / 24).toFixed(1) : "0.0";
                                 sendSystemNotification(newCount, currentRate + "/h");
 
                                 const s = latestStatsRef.current;
-                                const msg = `發文數更新:${newCount} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${s.rate1H}&${s.rate1D}&${s.rate2D} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
+                                const r1 = vStats && vStats[1] ? (vStats[1].current / 1).toFixed(1) : "0.0";
+                                const r24 = vStats && vStats[24] ? (vStats[24].current / 24).toFixed(1) : "0.0";
+                                const r48 = vStats && vStats[48] ? (vStats[48].current / 48).toFixed(1) : "0.0";
+                                
+                                const msg = `發文數更新:${newCount} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${r1}&${r24}&${r48} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
                                 
                                 fetchFromApi(0); 
@@ -1621,25 +1624,9 @@
             }, [targetPostCount]);
 
 
-            // Update statsRef for notification
+            // Update ref for velocity stats (crucial for webhook)
             useEffect(() => {
-                if (velocityStats) {
-                    const v1 = velocityStats[1];
-                    const v24 = velocityStats[24];
-                    const v48 = velocityStats[48];
-
-                    const r1 = v1 ? (v1.current / 1).toFixed(1) : "0.0";
-                    const r24 = v24 ? (v24.current / 24).toFixed(1) : "0.0";
-                    const r48 = v48 ? (v48.current / 48).toFixed(1) : "0.0";
-
-                    setStatsRef(prev => ({ 
-                        ...prev, 
-                        velocity24h: r24,
-                        rate1H: r1,
-                        rate1D: r24,
-                        rate2D: r48
-                    }));
-                }
+                latestVelocityStatsRef.current = velocityStats;
             }, [velocityStats]);
 
             // Trigger translation when posts update
@@ -1880,13 +1867,8 @@
                 return res;
             }, [historicalStats, realTimeComparison]);
 
-            useEffect(() => {
-                if (velocityStats && velocityStats[24]) {
-                    const v24 = velocityStats[24];
-                    const rate = (v24.current / 24).toFixed(2);
-                    setStatsRef(prev => ({ ...prev, velocity24h: rate }));
-                }
-            }, [velocityStats]);
+            // REPLACED: Use Ref update instead of State update for velocity to prevent stale closures and extra renders
+            // This is handled by latestVelocityStatsRef in App component body
 
             const lastLongSilence = useMemo(() => {
                 if (posts.length < 2) return null;
@@ -2017,8 +1999,15 @@
                                     <button 
                                         onClick={async () => {
                                             const s = latestStatsRef.current;
+                                            const vStats = latestVelocityStatsRef.current;
+                                            
+                                            // Ensure we grab values from vStats if available, otherwise fallback to "0.0"
+                                            const r1 = vStats && vStats[1] ? (vStats[1].current / 1).toFixed(1) : "0.0";
+                                            const r24 = vStats && vStats[24] ? (vStats[24].current / 24).toFixed(1) : "0.0";
+                                            const r48 = vStats && vStats[48] ? (vStats[48].current / 48).toFixed(1) : "0.0";
+                                            
                                             const currentCnt = specialCount !== null ? specialCount : posts.length;
-                                            const msg = `發文數更新:${currentCnt} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${s.rate1H}&${s.rate1D}&${s.rate2D} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
+                                            const msg = `發文數更新:${currentCnt} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${r1}&${r24}&${r48} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
                                             
                                             // Trigger alarm and notification just like before
                                             playAlarm();
@@ -2034,7 +2023,7 @@
                                                     return;
                                                 }
                                             }
-                                            sendSystemNotification(specialCount || 0, (statsRef.velocity24h || "0.0") + "/h");
+                                            sendSystemNotification(specialCount || 0, r24 + "/h");
                                             
                                             sendWebhook(msg);
                                             addLog("已發送測試通知(當前數據)");
