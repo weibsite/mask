@@ -179,6 +179,42 @@
         .animate-pulse-red {
             animation: pulse-red 2s infinite;
         }
+        /* AI Keywords */
+        .kw-hot { color: #ef4444; font-weight: bold; text-shadow: 0 0 5px rgba(239, 68, 68, 0.3); }
+        .kw-cool { color: #10b981; font-weight: bold; text-shadow: 0 0 5px rgba(16, 185, 129, 0.3); }
+        
+        /* Link Preview */
+        .link-preview-box {
+            position: fixed;
+            z-index: 9999;
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+            width: 320px;
+            height: 240px;
+            pointer-events: none; /* Let clicks pass through if needed, mainly for display */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .link-preview-header {
+            padding: 4px 8px;
+            background: #111;
+            border-bottom: 1px solid #333;
+            color: #888;
+            font-size: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .link-preview-iframe {
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: #fff;
+        }
     </style>
 </head>
 <body>
@@ -219,6 +255,7 @@
         const Languages = (props) => <IconBase {...props} path={<g><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></g>} />;
         const Cpu = (props) => <IconBase {...props} path={<g><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></g>} />;
         const AlertTriangle = (props) => <IconBase {...props} path={<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>} />;
+        const ExternalLink = (props) => <IconBase {...props} path={<g><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></g>} />;
 
         // --- Helper Functions (Moved outside App) ---
         const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
@@ -238,44 +275,70 @@
             return t;
         };
 
-        const highlightContent = (text, accelerators, decelerators) => {
+        // --- Post Content Component with URL Detection ---
+        const PostContent = ({ text, accelerators, decelerators, onLinkHover, onLinkLeave }) => {
             if (!text) return null;
-            if ((!accelerators || accelerators.length === 0) && (!decelerators || decelerators.length === 0)) return text;
+            // Split by URL (http/https)
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const parts = text.split(urlRegex);
 
-            let parts = [text];
-            
-            const processKeywords = (currentParts, keywords, className) => {
-                let newParts = [];
-                currentParts.forEach(part => {
-                    if (typeof part !== 'string') {
-                        newParts.push(part);
-                        return;
-                    }
-                    // Escape regex special chars in keywords
-                    let regexStr = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-                    if(!regexStr) {
-                        newParts.push(part);
-                        return;
-                    }
-                    
-                    let regex = new RegExp(`(${regexStr})`, 'gi');
-                    let split = part.split(regex);
-                    
-                    split.forEach(s => {
-                        if (keywords.some(k => k.toLowerCase() === s.toLowerCase())) {
-                            newParts.push(<span key={Math.random()} className={className}>{s}</span>);
+            return (
+                <span className="text-gray-300 text-xs leading-relaxed break-words">
+                    {parts.map((part, i) => {
+                        if (part.match(urlRegex)) {
+                            // It's a URL
+                            return (
+                                <a 
+                                    key={i}
+                                    href={part}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-400 hover:text-blue-300 hover:underline mx-1 inline-flex items-center"
+                                    onMouseEnter={(e) => onLinkHover(e, part)}
+                                    onMouseLeave={onLinkLeave}
+                                >
+                                    <ExternalLink className="w-3 h-3 mr-0.5" />
+                                    {part.length > 25 ? part.substring(0, 22) + '...' : '連結'}
+                                </a>
+                            );
                         } else {
-                            newParts.push(s);
+                            // It's text, apply translation and highlighting
+                            let processed = simpleTranslate(part);
+                            
+                            // Highlight logic (merged from previous highlightContent)
+                            if ((!accelerators || accelerators.length === 0) && (!decelerators || decelerators.length === 0)) {
+                                return <span key={i}>{processed}</span>;
+                            }
+                            
+                            const allKeywords = [
+                                ...(accelerators || []).map(k => ({ word: k, type: 'acc' })), 
+                                ...(decelerators || []).map(k => ({ word: k, type: 'dec' }))
+                            ];
+                            
+                            if (allKeywords.length === 0) return <span key={i}>{processed}</span>;
+
+                            const pattern = new RegExp(`(${allKeywords.map(k => k.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+                            const subParts = processed.split(pattern);
+
+                            return (
+                                <span key={i}>
+                                    {subParts.map((sub, j) => {
+                                        const match = allKeywords.find(k => k.word.toLowerCase() === sub.toLowerCase());
+                                        if (match) {
+                                            return (
+                                                <span key={j} className={match.type === 'acc' ? "kw-hot" : "kw-cool"}>
+                                                    {sub}
+                                                </span>
+                                            );
+                                        }
+                                        return sub;
+                                    })}
+                                </span>
+                            );
                         }
-                    });
-                });
-                return newParts;
-            };
-
-            if (accelerators && accelerators.length > 0) parts = processKeywords(parts, accelerators, "kw-hot");
-            if (decelerators && decelerators.length > 0) parts = processKeywords(parts, decelerators, "kw-cool");
-
-            return parts;
+                    })}
+                </span>
+            );
         };
 
         // --- Components ---
@@ -1050,11 +1113,18 @@
             const [targetAlertTriggered, setTargetAlertTriggered] = useState(false);
             const alarmLoopRef = useRef(null);
 
+            // New Link Preview State
+            const [preview, setPreview] = useState(null); // { url, x, y }
+
             // Shared Google API Key for Translate V2
             const [googleApiKey, setGoogleApiKey] = useState(() => {
                 return localStorage.getItem('elon_tactical_google_key') || "AIzaSyDzecRAm37ySFjU7QDAAcihyJSwxSGvBAM";
             });
             const [googleTranslations, setGoogleTranslations] = useState({});
+
+            // AI State (Removed Gemini Logic, kept translation)
+            const [acceleratorKeywords, setAcceleratorKeywords] = useState([]); // Kept for future or manual setting
+            const [deceleratorKeywords, setDeceleratorKeywords] = useState([]);
 
             // Webhook State
             const [webhookUrl, setWebhookUrl] = useState(() => {
@@ -1170,7 +1240,29 @@
                 });
             };
 
-            // NEW: Google Translation Logic
+            // Link Hover Handler
+            const handleLinkHover = (e, url) => {
+                // Calculate position to keep it on screen
+                let x = e.clientX + 10;
+                let y = e.clientY + 20;
+                
+                // Adjust if too close to right edge
+                if (x + 320 > window.innerWidth) {
+                    x = window.innerWidth - 330;
+                }
+                // Adjust if too close to bottom
+                if (y + 240 > window.innerHeight) {
+                    y = e.clientY - 250;
+                }
+                
+                setPreview({ url, x, y });
+            };
+
+            const handleLinkLeave = () => {
+                setPreview(null);
+            };
+
+            // NEW: Google Translation Logic (Direct)
             const translatePostsBatch = useCallback(async (postsToTranslate) => {
                 if (!googleApiKey || postsToTranslate.length === 0) return;
                 
@@ -2177,29 +2269,71 @@
                                 )}
 
                                 <div className="space-y-3 max-h-80 overflow-y-auto custom-scroll pr-1">
-                                    {posts.slice(0, visiblePostsCount).map((post) => (
-                                        <div key={post.id} className="border-b border-gray-800 pb-2 last:border-0">
-                                            <div className="flex justify-between items-start mb-1">
-                                                <span className="text-[10px] text-sky-500 font-mono">
-                                                    {new Date(post.createdAt).toLocaleString('en-US', {
-                                                        timeZone: 'America/New_York',
-                                                        month: 'numeric', 
-                                                        day: 'numeric', 
-                                                        hour: '2-digit', 
-                                                        minute: '2-digit',
-                                                        hour12: false
-                                                    })} ET
-                                                </span>
-                                            </div>
-                                            <p className="text-gray-300 text-xs leading-relaxed">
-                                                {googleTranslations[post.id] ? (
-                                                    <span className="animate-in fade-in text-gray-200">{googleTranslations[post.id]}</span>
-                                                ) : (
-                                                    simpleTranslate(post.content) || <span className="italic text-gray-600">(純圖片/轉發)</span>
-                                                )}
-                                            </p>
-                                        </div>
-                                    ))}
+                                    {posts.slice(0, visiblePostsCount).map((post, index) => {
+                                        let silenceGap = null;
+                                        // Use index < posts.length - 1 to check next item
+                                        // The slice is 0..visibleCount. 'index' is within visible range.
+                                        // The original 'posts' array is available via closure.
+                                        // We need to check next item in 'posts' array to calculate gap.
+                                        // index in slice corresponds to index in posts (since slice(0,...))
+                                        if (index < posts.length - 1) {
+                                            const nextPost = posts[index + 1];
+                                            const diffMs = new Date(post.createdAt).getTime() - new Date(nextPost.createdAt).getTime();
+                                            const diffHours = diffMs / (1000 * 60 * 60);
+                                            
+                                            if (diffHours > 1.0) {
+                                                silenceGap = (
+                                                    <div className="flex items-center justify-center py-2 opacity-50">
+                                                        <div className="h-px w-8 bg-gray-700"></div>
+                                                        <span className="mx-2 text-[10px] text-gray-500 font-mono flex items-center">
+                                                            <Moon className="w-3 h-3 mr-1" />
+                                                            靜默 {diffHours.toFixed(1)}h
+                                                        </span>
+                                                        <div className="h-px w-8 bg-gray-700"></div>
+                                                    </div>
+                                                );
+                                            }
+                                        }
+
+                                        return (
+                                            <React.Fragment key={post.id}>
+                                                <div className="border-b border-gray-800 pb-2 last:border-0">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <span className="text-[10px] text-sky-500 font-mono">
+                                                            {new Date(post.createdAt).toLocaleString('en-US', {
+                                                                timeZone: 'America/New_York',
+                                                                month: 'numeric', 
+                                                                day: 'numeric', 
+                                                                hour: '2-digit', 
+                                                                minute: '2-digit',
+                                                                hour12: false
+                                                            })} ET
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-gray-300 text-xs leading-relaxed">
+                                                        {googleTranslations[post.id] ? (
+                                                            <PostContent
+                                                                text={googleTranslations[post.id]} 
+                                                                accelerators={acceleratorKeywords} 
+                                                                decelerators={deceleratorKeywords}
+                                                                onLinkHover={handleLinkHover}
+                                                                onLinkLeave={handleLinkLeave}
+                                                            />
+                                                        ) : (
+                                                            <PostContent
+                                                                text={post.content} 
+                                                                accelerators={acceleratorKeywords} 
+                                                                decelerators={deceleratorKeywords}
+                                                                onLinkHover={handleLinkHover}
+                                                                onLinkLeave={handleLinkLeave}
+                                                            />
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                {silenceGap}
+                                            </React.Fragment>
+                                        );
+                                    })}
                                     {visiblePostsCount < posts.length && (
                                         <button 
                                             onClick={() => setVisiblePostsCount(prev => Math.min(prev + 20, posts.length))}
@@ -2295,6 +2429,23 @@
                                     停止警報 (STOP)
                                 </button>
                              </div>
+                        </div>
+                    )}
+
+                    {/* Link Preview Popover */}
+                    {preview && (
+                        <div 
+                            className="link-preview-box animate-in fade-in zoom-in-95"
+                            style={{ top: preview.y, left: preview.x }}
+                        >
+                            <div className="link-preview-header">{preview.url}</div>
+                            <iframe 
+                                src={preview.url} 
+                                className="link-preview-iframe"
+                                title="Link Preview"
+                                sandbox="allow-scripts allow-same-origin"
+                                onError={(e) => { e.target.style.display='none'; }}
+                            />
                         </div>
                     )}
                 </div>
