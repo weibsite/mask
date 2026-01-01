@@ -1141,8 +1141,18 @@
                 heatmapMin: 0,
                 heatmapAvg: 0,
                 heatmapMax: 0,
-                rangeProbs: ""
+                rangeProbs: "",
+                rate1H: 0,
+                rate1D: 0,
+                rate2D: 0
             });
+
+            // Ref to always access latest state in callbacks
+            const latestStatsRef = useRef(statsRef);
+
+            useEffect(() => {
+                latestStatsRef.current = statsRef;
+            }, [statsRef]);
 
             // Update localStorage
             useEffect(() => { localStorage.setItem('elon_tactical_webhook', webhookUrl); }, [webhookUrl]);
@@ -1563,11 +1573,11 @@
                                 addLog("New post detected! Refreshing...");
                                 
                                 playAlarm();
-                                const currentRate = statsRef.velocity24h || "0.00";
+                                const currentRate = latestStatsRef.current.velocity24h || "0.00";
                                 sendSystemNotification(newCount, currentRate + "/h");
 
-                                const s = statsRef; 
-                                const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}    速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
+                                const s = latestStatsRef.current;
+                                const msg = `發文數更新:${newCount} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${s.rate1H}&${s.rate1D}&${s.rate2D} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
                                 
                                 fetchFromApi(0); 
@@ -1583,7 +1593,7 @@
                     setLoadingSpecial(false); 
                     isFetchingSpecialRef.current = false; 
                 }
-            }, [fetchFromApi, webhookUrl, statsRef, playAlarm, sendSystemNotification]); 
+            }, [fetchFromApi, webhookUrl, playAlarm, sendSystemNotification]);
 
             // Initial Load
             useEffect(() => {
@@ -1613,10 +1623,22 @@
 
             // Update statsRef for notification
             useEffect(() => {
-                if (velocityStats && velocityStats[24]) {
+                if (velocityStats) {
+                    const v1 = velocityStats[1];
                     const v24 = velocityStats[24];
-                    const rate = (v24.current / 24).toFixed(2);
-                    setStatsRef(prev => ({ ...prev, velocity24h: rate }));
+                    const v48 = velocityStats[48];
+
+                    const r1 = v1 ? (v1.current / 1).toFixed(1) : "0.0";
+                    const r24 = v24 ? (v24.current / 24).toFixed(1) : "0.0";
+                    const r48 = v48 ? (v48.current / 48).toFixed(1) : "0.0";
+
+                    setStatsRef(prev => ({ 
+                        ...prev, 
+                        velocity24h: r24,
+                        rate1H: r1,
+                        rate1D: r24,
+                        rate2D: r48
+                    }));
                 }
             }, [velocityStats]);
 
@@ -1994,6 +2016,11 @@
                                     </button>
                                     <button 
                                         onClick={async () => {
+                                            const s = latestStatsRef.current;
+                                            const currentCnt = specialCount !== null ? specialCount : posts.length;
+                                            const msg = `發文數更新:${currentCnt} 預測${s.predictionAvg}&${s.predictionConf} 速率(1H/1D/2D):${s.rate1H}&${s.rate1D}&${s.rate2D} 總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax} 區間機率預測:${s.rangeProbs}`;
+                                            
+                                            // Trigger alarm and notification just like before
                                             playAlarm();
                                             if (!("Notification" in window)) {
                                                 addLog("此瀏覽器不支援通知");
@@ -2008,7 +2035,9 @@
                                                 }
                                             }
                                             sendSystemNotification(specialCount || 0, (statsRef.velocity24h || "0.0") + "/h");
-                                            addLog("已發送測試通知");
+                                            
+                                            sendWebhook(msg);
+                                            addLog("已發送測試通知(當前數據)");
                                         }} 
                                         className="w-full bg-emerald-900/30 text-emerald-400 border border-emerald-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2"
                                     >
