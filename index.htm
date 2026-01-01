@@ -171,6 +171,14 @@
             margin-left: 2px;
         }
         @keyframes blink { 50% { opacity: 0; } }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .animate-pulse-red {
+            animation: pulse-red 2s infinite;
+        }
     </style>
 </head>
 <body>
@@ -209,6 +217,8 @@
         const Send = (props) => <IconBase {...props} path={<g><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></g>} />;
         const Bell = (props) => <IconBase {...props} path={<g><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></g>} />;
         const Languages = (props) => <IconBase {...props} path={<g><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></g>} />;
+        const Cpu = (props) => <IconBase {...props} path={<g><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></g>} />;
+        const AlertTriangle = (props) => <IconBase {...props} path={<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>} />;
 
         // --- Helper Functions (Moved outside App) ---
         const formatTimeET = (date) => date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute:'2-digit' });
@@ -226,6 +236,46 @@
             t = t.replace(/AI/g, "人工智慧");
             t = t.replace(/future/gi, "未來");
             return t;
+        };
+
+        const highlightContent = (text, accelerators, decelerators) => {
+            if (!text) return null;
+            if ((!accelerators || accelerators.length === 0) && (!decelerators || decelerators.length === 0)) return text;
+
+            let parts = [text];
+            
+            const processKeywords = (currentParts, keywords, className) => {
+                let newParts = [];
+                currentParts.forEach(part => {
+                    if (typeof part !== 'string') {
+                        newParts.push(part);
+                        return;
+                    }
+                    // Escape regex special chars in keywords
+                    let regexStr = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+                    if(!regexStr) {
+                        newParts.push(part);
+                        return;
+                    }
+                    
+                    let regex = new RegExp(`(${regexStr})`, 'gi');
+                    let split = part.split(regex);
+                    
+                    split.forEach(s => {
+                        if (keywords.some(k => k.toLowerCase() === s.toLowerCase())) {
+                            newParts.push(<span key={Math.random()} className={className}>{s}</span>);
+                        } else {
+                            newParts.push(s);
+                        }
+                    });
+                });
+                return newParts;
+            };
+
+            if (accelerators && accelerators.length > 0) parts = processKeywords(parts, accelerators, "kw-hot");
+            if (decelerators && decelerators.length > 0) parts = processKeywords(parts, decelerators, "kw-cool");
+
+            return parts;
         };
 
         // --- Components ---
@@ -317,7 +367,7 @@
                     <div className="flex space-x-2 text-center pb-1 justify-between">
                         {data.history.map((val, idx) => (
                             <div key={idx} className="flex-1 flex flex-col items-center bg-gray-900/50 rounded py-1">
-                                <span className="text-[8px] text-gray-500">-{idx+1}d</span>
+                                <span className="text-[8px] text-gray-500">-{7-idx}d</span>
                                 <span className={`text-[10px] font-mono ${val > data.current ? 'text-emerald-400' : (val < data.current ? 'text-red-400' : 'text-gray-300')}`}>{val}</span>
                             </div>
                         ))}
@@ -464,16 +514,13 @@
             const [probs, setProbs] = useState([]);
             const [selectedRange, setSelectedRange] = useState(null);
 
-            // Calculate Avg Daily Silence (>3h gaps)
             const avgDailySilence = useMemo(() => {
                 if (posts.length < 2) return 0;
                 const sorted = [...posts].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
                 let totalSilenceHours = 0;
                 const start = new Date(sorted[0].createdAt);
                 const end = new Date(sorted[sorted.length-1].createdAt);
-                // Total days covered by history (approx)
                 const days = Math.max(1, (end - start) / (1000 * 60 * 60 * 24));
-                
                 for(let i=0; i<sorted.length-1; i++) {
                     const diff = (new Date(sorted[i+1].createdAt) - new Date(sorted[i].createdAt)) / 3600000;
                     if(diff > 3) totalSilenceHours += diff;
@@ -490,16 +537,13 @@
                 const timer = setTimeout(() => {
                     const timestamps = posts.map(p => new Date(p.createdAt).getTime()).sort((a,b)=>a-b);
                     const windowMs = hoursToTarget * 3600 * 1000;
-                    
                     const now = Date.now();
                     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
                     const cutoffTime = now - thirtyDaysMs;
-
                     const n = timestamps.length;
                     
                     if (timestamps[n-1] - timestamps[0] < windowMs) return;
 
-                    // Sliding window
                     let left = 0;
                     let right = 0;
                     
@@ -536,23 +580,18 @@
 
                     const probsRecent = calcBucketProbs(samplesRecent);
                     const probsOld = calcBucketProbs(samplesOld);
-                    
                     const results = [];
                     const maxBucketIdx = Math.floor(739 / 20); 
                     const currentBucketIdx = Math.floor((currentCount || 0) / 20);
-
                     let webhookStr = "";
 
                     for (let i = currentBucketIdx; i <= maxBucketIdx; i++) {
                         const start = i * 20;
                         const end = start + 19;
-                        
                         if (end < currentCount) continue;
-                        
                         let prob = 0;
                         const pR = probsRecent[i] || 0;
                         const pO = probsOld[i] || 0;
-
                         if (samplesRecent.length > 0 && samplesOld.length > 0) {
                             prob = (pR * 0.7) + (pO * 0.3);
                         } else if (samplesRecent.length > 0) {
@@ -560,9 +599,7 @@
                         } else {
                             prob = pO;
                         }
-                        
                         const probPercent = prob * 100;
-                        
                         if (probPercent >= 0.1) {
                             const pStr = probPercent.toFixed(1);
                             results.push({ range: `${start}~${end}`, prob: pStr });
@@ -570,12 +607,8 @@
                         }
                     }
                     setProbs(results);
-                    
-                    // Update ref for webhook
                     setStatsRef(prev => ({ ...prev, rangeProbs: webhookStr }));
-
                 }, 500); 
-
                 return () => clearTimeout(timer);
             }, [posts, currentCount, hoursToTarget, setStatsRef]);
 
@@ -594,11 +627,8 @@
                         <div>
                              <div className="grid grid-cols-4 gap-2">
                                  {probs.map((p, idx) => (
-                                     <div 
-                                        key={idx} 
-                                        onClick={() => setSelectedRange(p)}
-                                        className="bg-gray-800/40 rounded p-2 text-center border border-gray-700/50 cursor-pointer hover:bg-gray-700/50 transition-colors"
-                                     >
+                                     <div key={idx} onClick={() => setSelectedRange(p)}
+                                        className="bg-gray-800/40 rounded p-2 text-center border border-gray-700/50 cursor-pointer hover:bg-gray-700/50 transition-colors">
                                          <div className="text-[10px] text-gray-400">{p.range}</div>
                                          <div className={`text-sm font-bold font-mono ${parseFloat(p.prob) > 20 ? 'text-emerald-400' : 'text-white'}`}>{p.prob}%</div>
                                      </div>
@@ -609,22 +639,13 @@
                     <div className="text-[9px] text-gray-600 mt-2 text-right">
                         近期權重 70% | 遠期權重 30% | 過濾 &lt;0.1%
                     </div>
-                    
                     {selectedRange && (
-                        <RangeAnalysisModal 
-                            data={selectedRange} 
-                            currentCount={currentCount} 
-                            hoursToTarget={hoursToTarget} 
-                            avgDailySilence={avgDailySilence}
-                            onClose={() => setSelectedRange(null)} 
-                        />
+                        <RangeAnalysisModal data={selectedRange} currentCount={currentCount} hoursToTarget={hoursToTarget} avgDailySilence={avgDailySilence} onClose={() => setSelectedRange(null)} />
                     )}
                 </div>
             );
         };
 
-
-        // --- Weekly Heatmap Component ---
         const WeeklyHeatmap = ({ posts, liveCount, setStatsRef }) => {
             const [selectedDate, setSelectedDate] = useState(() => {
                 const saved = localStorage.getItem('elon_tactical_heatmap_date');
@@ -668,7 +689,6 @@
             useEffect(() => {
                 if (availableKeyDates.length > 0) {
                      const isSelectedInList = availableKeyDates.some(d => d.toDateString() === selectedDate.toDateString());
-                     
                      if (!isSelectedInList) {
                          setSelectedDate(availableKeyDates[availableKeyDates.length - 1]);
                      }
@@ -693,16 +713,13 @@
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
             }, [selectedDate]);
 
-            // Enhanced Stats Calculation: Min, Avg, Max
             const getHistoricalStats = (targetDate, currentVal, dayIndex) => {
                 if (!targetDate || posts.length === 0) return { min:0, avg:0, max:0, isToday: false, isFuture: false };
-
                 const nowET = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
                 const targetET = new Date(targetDate.toLocaleString("en-US", {timeZone: "America/New_York"}));
                 targetET.setHours(0,0,0,0);
                 const todayET = new Date(nowET);
                 todayET.setHours(0,0,0,0);
-
                 const isToday = targetET.getTime() === todayET.getTime();
                 const isFuture = targetET.getTime() > todayET.getTime();
                 const currentHourET = nowET.getHours();
@@ -713,49 +730,36 @@
                 for(let i=1; i<=12; i++) {
                     const pastDate = new Date(targetDate);
                     pastDate.setDate(pastDate.getDate() - (i * 7));
-                    
                     const startMs = Date.UTC(pastDate.getFullYear(), pastDate.getMonth(), pastDate.getDate(), 5, 0, 0); 
                     const endMs = startMs + (24 * 3600000);
                     const cutoffMs = startMs + (currentHourET * 3600000);
-
                     let validStart = startMs;
                     let validEnd = endMs;
                     if (dayIndex === 0) validStart = startMs + (12 * 3600000); 
                     else if (dayIndex === 7) validEnd = startMs + (12 * 3600000); 
-
                     const dayPosts = posts.filter(p => {
                         const t = new Date(p.createdAt).getTime();
                         return t >= validStart && t < validEnd;
                     });
-                    
                     const soFarPosts = dayPosts.filter(p => {
                          const t = new Date(p.createdAt).getTime();
                          return t < cutoffMs; 
                     });
-
                     const oldestPost = posts[posts.length-1];
                     if (oldestPost && pastDate > new Date(oldestPost.createdAt)) {
                         historicalTotals.push(dayPosts.length);
                         historicalRemainings.push(dayPosts.length - soFarPosts.length);
                     }
                 }
-                
                 const calcStats = (arr) => {
                     if (arr.length === 0) return { min:0, avg:0, max:0 };
                     const sorted = [...arr].sort((a,b)=>a-b);
                     const sum = sorted.reduce((a,b)=>a+b,0);
-                    return {
-                        min: sorted[0],
-                        max: sorted[sorted.length-1],
-                        avg: sum / sorted.length
-                    };
+                    return { min: sorted[0], max: sorted[sorted.length-1], avg: sum / sorted.length };
                 }
-
                 const totalStats = calcStats(historicalTotals);
                 const remainStats = calcStats(historicalRemainings);
-
                 let res = { min: 0, avg: 0, max: 0, isToday, isFuture };
-
                 if (isToday) {
                     res.min = currentVal + remainStats.min;
                     res.avg = currentVal + remainStats.avg;
@@ -765,7 +769,6 @@
                     res.avg = totalStats.avg;
                     res.max = totalStats.max;
                 }
-
                 return res;
             };
 
@@ -782,15 +785,11 @@
                         const diffHours = Math.floor(diffMs / 3600000);
                         const dayIdx = Math.floor(diffHours / 24);
                         const hourIdx = diffHours % 24;
-                        if (dayIdx >= 0 && dayIdx < 8) {
-                            grid[hourIdx][dayIdx]++;
-                        }
+                        if (dayIdx >= 0 && dayIdx < 8) grid[hourIdx][dayIdx]++;
                     }
                 });
                 const headers = [];
-                for(let i=0; i<8; i++) {
-                    headers.push(new Date(gridStartTimeMs + i * oneDay));
-                }
+                for(let i=0; i<8; i++) headers.push(new Date(gridStartTimeMs + i * oneDay));
                 return { grid, headers, activeStartMs, activeEndMs };
             }, [activeWindow, posts]);
 
@@ -814,10 +813,8 @@
                          if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
                          return acc;
                     }, 0);
-
                     const validActual = isFuture ? 0 : colSum;
                     totalActual += validActual;
-
                     const stats = getHistoricalStats(d, validActual, dIdx);
                     
                     if (stats.isFuture || stats.isToday) {
@@ -832,15 +829,12 @@
                 });
                 
                 const result = { totalActual, proj: {min: projMin, avg: projAvg, max: projMax} };
-
-                // Update ref for webhook
                 setStatsRef(prev => ({
                     ...prev,
                     heatmapMin: projMin.toFixed(0),
                     heatmapAvg: projAvg.toFixed(0),
                     heatmapMax: projMax.toFixed(0)
                 }));
-
                 return result;
             }, [gridData, posts, setStatsRef]); 
 
@@ -866,11 +860,7 @@
                             <span className="text-[9px] text-gray-500 w-6">Tue</span>
                             <div className="flex flex-wrap gap-2">
                                 {tuesdayDates.map(d => (
-                                    <button 
-                                        key={d.toISOString()} 
-                                        onClick={() => handleSelectDate(d)} 
-                                        className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-sky-600 text-white border-sky-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}
-                                    >
+                                    <button key={d.toISOString()} onClick={() => handleSelectDate(d)} className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-sky-600 text-white border-sky-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}>
                                         {d.getDate()}
                                     </button>
                                 ))}
@@ -880,11 +870,7 @@
                             <span className="text-[9px] text-gray-500 w-6">Fri</span>
                             <div className="flex flex-wrap gap-2">
                                 {fridayDates.map(d => (
-                                    <button 
-                                        key={d.toISOString()} 
-                                        onClick={() => handleSelectDate(d)} 
-                                        className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-purple-600 text-white border-purple-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}
-                                    >
+                                    <button key={d.toISOString()} onClick={() => handleSelectDate(d)} className={`text-[10px] font-mono px-3 py-1 rounded border transition-all ${selectedDate.getDate() === d.getDate() && selectedDate.getMonth() === d.getMonth() ? "bg-purple-600 text-white border-purple-400 font-bold shadow-lg" : "bg-gray-800 text-gray-400 border-gray-700"}`}>
                                         {d.getDate()}
                                     </button>
                                 ))}
@@ -930,7 +916,6 @@
                                          return <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">{isFuture ? '-' : colSum}</div>
                                      })}
                                 </div>
-                                {/* Proj. Row with Min/Avg/Max */}
                                 <div className="flex mt-1 pb-1">
                                      <div className="w-8 text-[9px] text-gray-500 text-right pr-2 leading-[14px]">Proj.</div>
                                      {gridData.grid[0].map((_, dIdx) => {
@@ -975,19 +960,14 @@
             );
         };
 
-        // --- New Historical Range Stats Component ---
         const HistoricalRangeStats = ({ posts, currentActiveWindow, activeCycleType }) => {
             const [stats, setStats] = useState([]);
 
             useEffect(() => {
                 if (!posts.length) return;
-                
-                // Known Cycle Starts (Date Strings)
                 const knownTueCycles = ["2024/11/04", "2024/11/11", "2024/11/18", "2024/11/25", "2024/12/02", "2024/12/09", "2024/12/16"];
                 const knownThuCycles = ["2024/10/31", "2024/11/07", "2024/11/14", "2024/11/21", "2024/11/28", "2024/12/05", "2024/12/12", "2024/12/19"];
-
                 const targetCycles = activeCycleType === 'thu' ? knownThuCycles : knownTueCycles;
-                
                 const cycleCounts = [];
                 
                 targetCycles.forEach(dateStr => {
@@ -995,51 +975,36 @@
                     const y = parseInt(parts[0]);
                     const m = parseInt(parts[1]) - 1;
                     const d = parseInt(parts[2]);
-                    
-                    // Construct 12:00 ET (UTC-5) -> 17:00 UTC
                     const startMs = Date.UTC(y, m, d, 17, 0, 0); 
                     const endMs = startMs + (7 * 24 * 3600 * 1000); // 7 Days
-                    
                     const count = posts.filter(p => {
                         const t = new Date(p.createdAt).getTime();
                         return t >= startMs && t < endMs;
                     }).length;
-                    
                     cycleCounts.push(count);
                 });
                 
                 const totalCycles = cycleCounts.length;
                 if (totalCycles === 0) return;
-
                 const bucketCounts = {};
                 cycleCounts.forEach(val => {
                     const bucketIdx = Math.floor(val / 20);
                     bucketCounts[bucketIdx] = (bucketCounts[bucketIdx] || 0) + 1;
                 });
-                
                 const results = [];
                 const maxBucketIdx = Math.max(...Object.keys(bucketCounts).map(Number), 0); 
-                
                 for(let i=0; i<=maxBucketIdx; i++) {
                     if (bucketCounts[i]) {
                         const count = bucketCounts[i];
                         const prob = (count / totalCycles) * 100;
-                        results.push({
-                            range: `${i*20}~${i*20+19}`,
-                            count: count,
-                            prob: prob.toFixed(1)
-                        });
+                        results.push({ range: `${i*20}~${i*20+19}`, count: count, prob: prob.toFixed(1) });
                     }
                 }
-                
                 results.sort((a,b) => {
                     const startA = parseInt(a.range.split('~')[0]);
-                    const startB = parseInt(b.range.split('~')[0]);
-                    return startA - startB;
+                    return startA - parseInt(b.range.split('~')[0]);
                 });
-
                 setStats({ totalCycles, data: results, type: activeCycleType === 'thu' ? '週四 (Thu)' : '週二 (Tue)' });
-
             }, [posts, activeCycleType]);
 
             if (!stats || !stats.data || stats.data.length === 0) return null;
@@ -1066,8 +1031,6 @@
         };
 
         const App = () => {
-            // ... (App state and other hooks) ...
-            // --- State ---
             const [posts, setPosts] = useState([]);
             const [userInfo, setUserInfo] = useState(null);
             const [loading, setLoading] = useState(false);
@@ -1078,26 +1041,31 @@
             const [errorMsg, setErrorMsg] = useState(null);
             const [isNewPost, setIsNewPost] = useState(false);
             const [selectedStatDetail, setSelectedStatDetail] = useState(null);
-            const [initLogs, setInitLogs] = useState([]); // Log state
+            const [initLogs, setInitLogs] = useState([]); 
             const [visiblePostsCount, setVisiblePostsCount] = useState(30);
             
-            // Google Translation State
+            // New Target Alert State
+            const [targetPostCount, setTargetPostCount] = useState('');
+            const [showTargetAlert, setShowTargetAlert] = useState(false);
+            const [targetAlertTriggered, setTargetAlertTriggered] = useState(false);
+            const alarmLoopRef = useRef(null);
+
+            // Shared Google API Key for Translate V2
             const [googleApiKey, setGoogleApiKey] = useState(() => {
-                return localStorage.getItem('elon_tactical_google_key') || "";
+                return localStorage.getItem('elon_tactical_google_key') || "AIzaSyDzecRAm37ySFjU7QDAAcihyJSwxSGvBAM";
             });
-            const [googleTranslations, setGoogleTranslations] = useState({}); // Map: { postId: translatedText }
+            const [googleTranslations, setGoogleTranslations] = useState({});
 
             // Webhook State
             const [webhookUrl, setWebhookUrl] = useState(() => {
                 return localStorage.getItem('elon_tactical_webhook') || "https://script.google.com/macros/s/AKfycbwJDJIgYP-XB70DpSiAYcVprTo-C5562Lvdj25M4KkxKpMt9OEq417a8ctUUBP-TZkw/exec";
             });
             
-            // Stats Ref to hold latest calculated values for webhook
             const [statsRef, setStatsRef] = useState({
                 predictionAvg: 0,
                 predictionConf: 0,
                 velocity12H: 0,
-                velocity24h: 0, // NEW: For notification
+                velocity24h: 0, 
                 projectedCurrent: 0,
                 projected7Day: 0,
                 heatmapMin: 0,
@@ -1106,33 +1074,41 @@
                 rangeProbs: ""
             });
 
-            // Update localStorage when URL changes
-            useEffect(() => {
-                localStorage.setItem('elon_tactical_webhook', webhookUrl);
-            }, [webhookUrl]);
-
-            // Update localStorage when API Key changes
-            useEffect(() => {
-                localStorage.setItem('elon_tactical_google_key', googleApiKey);
-            }, [googleApiKey]);
+            // Update localStorage
+            useEffect(() => { localStorage.setItem('elon_tactical_webhook', webhookUrl); }, [webhookUrl]);
+            useEffect(() => { localStorage.setItem('elon_tactical_google_key', googleApiKey); }, [googleApiKey]);
 
             // Audio & Notification Logic
             const playAlarm = useCallback(() => {
                 try {
                     const audio = new Audio('Alarm02.wav');
-                    audio.play().catch(() => { 
-                        // Ignore auto-play policy errors or file not found
-                    });
-                } catch (e) {
-                    // Ignore construction errors
+                    audio.play().catch(() => { });
+                } catch (e) { }
+            }, []);
+
+            // Loop Alarm Logic
+            const playLoopAlarm = useCallback(() => {
+                if (alarmLoopRef.current) return; // Already playing
+                try {
+                    const audio = new Audio('Alarm02.wav');
+                    audio.loop = true;
+                    audio.play().catch(e => console.log("Audio play failed", e));
+                    alarmLoopRef.current = audio;
+                } catch (e) { }
+            }, []);
+
+            const stopLoopAlarm = useCallback(() => {
+                if (alarmLoopRef.current) {
+                    alarmLoopRef.current.pause();
+                    alarmLoopRef.current.currentTime = 0;
+                    alarmLoopRef.current = null;
                 }
+                setShowTargetAlert(false);
             }, []);
 
             const requestNotificationPermission = useCallback(() => {
                 if (!("Notification" in window)) return;
-                if (Notification.permission !== "granted") {
-                    Notification.requestPermission();
-                }
+                if (Notification.permission !== "granted") Notification.requestPermission();
             }, []);
 
             const sendSystemNotification = useCallback((currentCount, rate24h) => {
@@ -1142,26 +1118,20 @@
                         const title = "Elon Mobile Tactical";
                         const body = `發文數更新:目前發文數 ${currentCount}, 目前1天平均速率為: ${rate24h}`;
                         new Notification(title, { body, icon: 'https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png' });
-                    } catch (e) {
-                        console.error("Notification error", e);
-                    }
+                    } catch (e) { console.error("Notification error", e); }
                 }
             }, []);
 
             // Webhook sender function
             const sendWebhook = async (message) => {
                 if (!webhookUrl) return;
-                
                 addLog(`發送 Webhook: ${message}`);
-                
                 let requestOptions = {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 };
-
                 let fetchUrl = webhookUrl;
-
                 if (webhookUrl.includes("discord.com")) {
                     requestOptions.body = JSON.stringify({ content: message });
                 } else if (webhookUrl.includes("script.google.com")) {
@@ -1171,7 +1141,6 @@
                 } else {
                     requestOptions.body = JSON.stringify({ message: message, text: message });
                 }
-
                 try {
                     await fetch(fetchUrl, requestOptions);
                     addLog("Webhook 發送成功");
@@ -1215,9 +1184,7 @@
                     const url = `https://translation.googleapis.com/language/translate/v2?key=${googleApiKey}`;
                     const response = await fetch(url, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             q: targets.map(p => p.content),
                             target: 'zh-TW',
@@ -1297,7 +1264,6 @@
             }, [activeCycleType]);
 
             // --- CRITICAL FIX: Define hoursSinceLast HERE ---
-            // It MUST be defined before any hook that uses it (rtStats, etc.)
             let hoursSinceLast = 0;
             const lastPost = posts.length > 0 ? posts[0] : null;
             const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
@@ -1440,7 +1406,9 @@
                     addLog(`Received ${postsData.length} posts.`);
 
                     if (Array.isArray(postsData) && postsData.length > 0) {
-                        processData(postsData);
+                        const sorted = [...postsData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                        setPosts(sorted);
+                        setLastUpdated(new Date());
                         setDataSource("Live API (90 Days)");
                         setShowControls(false); 
                         setErrorMsg(null);
@@ -1453,6 +1421,7 @@
                                 if (uData.success) setUserInfo(uData.data);
                             }
                         } catch(e) {}
+
                     } else {
                         addLog("Warning: No posts found.");
                         throw new Error("No data found");
@@ -1497,7 +1466,6 @@
                                 setTimeout(() => setIsNewPost(false), 2000); 
                                 addLog("New post detected! Refreshing...");
                                 
-                                // Trigger Alarm & Notification
                                 playAlarm();
                                 const currentRate = statsRef.velocity24h || "0.00";
                                 sendSystemNotification(newCount, currentRate + "/h");
@@ -1505,7 +1473,8 @@
                                 const s = statsRef; 
                                 const msg = `發文數更新:${newCount}預測${s.predictionAvg}&${s.predictionConf}    速率:${s.velocity12H}&${s.projectedCurrent}&${s.projected7Day}總預估值${s.heatmapMin},${s.heatmapAvg},${s.heatmapMax}區間機率預測:${s.rangeProbs}`;
                                 sendWebhook(msg);
-                                fetchFromApi(); 
+                                
+                                fetchFromApi(0); 
                             }
                             prevSpecialCountRef.current = newCount;
                             setSpecialCount(newCount);
@@ -1520,26 +1489,45 @@
                 }
             }, [fetchFromApi, webhookUrl, statsRef, playAlarm, sendSystemNotification]); 
 
+            // Initial Load
             useEffect(() => {
                 addLog("System Init...");
                 fetchSpecialData();
+                fetchFromApi(0); 
                 const interval = setInterval(fetchSpecialData, 5000); 
                 return () => clearInterval(interval);
-            }, [fetchSpecialData]);
+            }, []);
 
-            useEffect(() => { fetchFromApi(0); }, [fetchFromApi]);
+            // Target Alert Check
+            useEffect(() => {
+                if (!targetPostCount || specialCount === null) return;
+                const target = parseInt(targetPostCount);
+                if (!isNaN(target) && specialCount >= target && !targetAlertTriggered) {
+                    setShowTargetAlert(true);
+                    playLoopAlarm();
+                    setTargetAlertTriggered(true); // Prevent re-trigger until target changes
+                }
+            }, [specialCount, targetPostCount, targetAlertTriggered, playLoopAlarm]);
 
-            const processData = (rawData) => {
-                const sorted = [...rawData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                setPosts(sorted);
-                setLastUpdated(new Date());
-            };
+            // Reset trigger when target changes
+            useEffect(() => {
+                setTargetAlertTriggered(false);
+            }, [targetPostCount]);
+
+
+            // Update statsRef for notification
+            useEffect(() => {
+                if (velocityStats && velocityStats[24]) {
+                    const v24 = velocityStats[24];
+                    const rate = (v24.current / 24).toFixed(2);
+                    setStatsRef(prev => ({ ...prev, velocity24h: rate }));
+                }
+            }, [velocityStats]);
 
             // Trigger translation when posts update
             useEffect(() => {
                 if (posts.length > 0 && googleApiKey) {
                     const topPosts = posts.slice(0, visiblePostsCount);
-                    // Debounce slightly to avoid rapid calls
                     const timer = setTimeout(() => {
                         translatePostsBatch(topPosts);
                     }, 1000);
@@ -1547,14 +1535,13 @@
                 }
             }, [posts, googleApiKey, translatePostsBatch, visiblePostsCount]);
 
-            // ... (CSV Parsing Logic - same as above) ...
+            // ... (CSV Parsing Logic - unchanged) ...
             const parseCSVChunked = (text, onComplete) => {
                 const lines = text.split(/\r?\n/);
                 const total = lines.length;
                 let current = 1; 
                 const chunkSize = 200; 
                 const results = [];
-                
                 const parseLine = (line) => {
                     const result = [];
                     let start = 0;
@@ -1566,30 +1553,23 @@
                     result.push(line.substring(start));
                     return result.map(s => s.replace(/^"|"$/g, '').replace(/""/g, '"'));
                 };
-
                 if (total < 2) { onComplete([]); return; }
-
                 const headers = parseLine(lines[0]);
                 const idIdx = headers.findIndex(h => h.includes("Tweet ID"));
                 const contentIdx = headers.findIndex(h => h.includes("Content") || h.toLowerCase() === 'content');
                 const dateIdx = headers.findIndex(h => h.includes("Posted At") || h.includes("Posted Date"));
                 const timeIdx = headers.findIndex(h => h.includes("Posted Time"));
                 const fullTimeIdx = headers.findIndex(h => h.includes("TIME"));
-
                 if (contentIdx === -1) {
                      setErrorMsg("CSV 格式錯誤: 找不到 Content 欄位");
                      onComplete([]);
                      return;
                 }
-                
-                // Allow missing ID (auto-generate)
-                // Require Date (either Posted At or TIME)
                 if (dateIdx === -1 && fullTimeIdx === -1) {
                     setErrorMsg("CSV 格式錯誤: 缺少時間欄位");
                     onComplete([]);
                     return;
                 }
-
                 const processChunk = () => {
                     const end = Math.min(current + chunkSize, total);
                     for (let i = current; i < end; i++) {
@@ -1597,8 +1577,6 @@
                         try {
                             const cols = parseLine(lines[i]);
                             let dateStr = "";
-                            
-                            // Try TIME first
                             if (fullTimeIdx !== -1 && cols[fullTimeIdx]) {
                                 dateStr = cols[fullTimeIdx];
                             } else if (dateIdx !== -1) {
@@ -1607,13 +1585,9 @@
                                     dateStr += " " + cols[timeIdx]; 
                                 }
                             }
-                            
                             const dateObj = new Date(dateStr);
                             const content = cols[contentIdx];
-                            
-                            // Generate ID if missing
                             const id = (idIdx !== -1 && cols[idIdx]) ? cols[idIdx] : `csv-${i}-${Date.now()}`;
-
                             if (!isNaN(dateObj) && content) {
                                 results.push({ id, content, createdAt: dateObj.toISOString() });
                             }
@@ -1623,7 +1597,6 @@
                     }
                     current = end;
                     if (current < total) {
-                        if (current % 1000 === 0) addLog(`Processing CSV... ${(current/total*100).toFixed(0)}%`);
                         setTimeout(processChunk, 0); 
                     } else {
                         onComplete(results);
@@ -1633,24 +1606,19 @@
             };
 
             const calibrateAndMerge = (currentApiData, newCsvData) => {
-                addLog(`Merging... API: ${currentApiData.length}, CSV: ${newCsvData.length}`);
                 let timeOffset = 0;
                 let matched = false;
                 const sortedApi = [...currentApiData].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-                
                 for (let apiPost of sortedApi) {
                     const match = newCsvData.find(c => c.content.trim() === apiPost.content.trim());
                     if (match) {
                         const apiTime = new Date(apiPost.createdAt).getTime();
                         const csvTime = new Date(match.createdAt).getTime();
                         timeOffset = apiTime - csvTime;
-                        addLog(`Time Calibration Offset: ${timeOffset}ms (${(timeOffset/60000).toFixed(1)} mins)`);
                         matched = true;
                         break; 
                     }
                 }
-                if (!matched) addLog("Warning: No matching content found for calibration.");
-
                 const postMap = new Map();
                 currentApiData.forEach(p => postMap.set(p.id, p));
                 newCsvData.forEach(p => {
@@ -1663,16 +1631,13 @@
                         postMap.set(newPost.id, newPost);
                     }
                 });
-                
                 const finalPosts = Array.from(postMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                addLog(`Merge Complete. Total: ${finalPosts.length}`);
                 return finalPosts;
             };
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                addLog(`Reading CSV: ${file.name}`);
                 setLoading(true); 
                 const reader = new FileReader();
                 reader.onload = (evt) => {
@@ -1686,7 +1651,6 @@
                             setErrorMsg(null);
                         } else {
                             setErrorMsg("CSV 解析失敗");
-                            addLog("CSV parsing failed.");
                         }
                         setLoading(false);
                     });
@@ -1695,19 +1659,8 @@
                 reader.readAsText(file);
             };
 
-            const simpleTranslate = (text) => {
-                if (!text) return "";
-                let t = text;
-                t = t.replace(/RT /g, "【轉推】");
-                t = t.replace(/Space/gi, "太空");
-                t = t.replace(/Mars/gi, "火星");
-                t = t.replace(/crypto/gi, "加密貨幣");
-                t = t.replace(/doge/gi, "狗狗幣");
-                t = t.replace(/AI/g, "人工智慧");
-                t = t.replace(/future/gi, "未來");
-                return t;
-            };
-
+            // --- RE-ADDED MISSING STATS LOGIC ---
+            
             const rtStats = useMemo(() => {
                 if (posts.length === 0) return { rt: 0, original: 0, rtPercent: 0, total: 0 };
                 const now = new Date();
@@ -1768,7 +1721,8 @@
                 [1, 6, 12, 24, 48, 72, 96, 120, 144, 168].forEach(h => {
                     const current = getCount(now, h);
                     const history = [];
-                    for(let d=1; d<=7; d++) history.push(getCount(new Date(now.getTime() - d*86400000), h));
+                    // Changed loop order: from 7 days ago to 1 day ago
+                    for(let d=7; d>=1; d--) history.push(getCount(new Date(now.getTime() - d*86400000), h));
                     const sum7d = history.reduce((a,c)=>a+c,0);
                     const avg7d = sum7d/7;
                     const ratio7d = avg7d>0 ? (current/avg7d)*100 : (current>0?100:0);
@@ -1808,7 +1762,6 @@
                 return res;
             }, [historicalStats, realTimeComparison]);
 
-            // NEW: Update statsRef with 24h velocity for notification
             useEffect(() => {
                 if (velocityStats && velocityStats[24]) {
                     const v24 = velocityStats[24];
@@ -1843,7 +1796,6 @@
                 }
                 return null;
             }, [posts, currentTime]);
-
 
             const tacticalData = useMemo(() => {
                 if (posts.length < 2) return null; 
@@ -1934,14 +1886,14 @@
                     </div>
 
                     {/* Controls */}
-                    <div className="bg-[#0a0a0a] border-b border-gray-900 transition-all duration-300 ease-in-out overflow-hidden" style={{maxHeight: showControls ? '400px' : '0', opacity: showControls ? 1 : 0}}>
+                    <div className="bg-[#0a0a0a] border-b border-gray-900 transition-all duration-300 ease-in-out overflow-hidden" style={{maxHeight: showControls ? '550px' : '0', opacity: showControls ? 1 : 0}}>
                         <div className="px-4 py-2 space-y-2">
                                 <div className="flex justify-between items-center text-xs text-red-400 mb-1">
                                     <span>⚠️ {errorMsg || "連線需注意"}</span>
                                     <button onClick={() => setShowControls(false)} className="text-gray-500">隱藏</button>
                                 </div>
                                 <div className="flex gap-2">
-                                     <button onClick={fetchFromApi} disabled={loading} className="w-full bg-sky-900/30 text-sky-400 border border-sky-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2">
+                                     <button onClick={() => fetchFromApi(0)} disabled={loading} className="w-full bg-sky-900/30 text-sky-400 border border-sky-800 py-3 rounded text-sm font-medium flex justify-center items-center mb-2">
                                         {loading ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : "重試連線"}
                                     </button>
                                     <button 
@@ -1951,8 +1903,6 @@
                                                 addLog("此瀏覽器不支援通知");
                                                 return;
                                             }
-                                            
-                                            // Check and request permission
                                             if (Notification.permission !== "granted") {
                                                 addLog("正在請求通知權限...");
                                                 const permission = await Notification.requestPermission();
@@ -1961,7 +1911,6 @@
                                                     return;
                                                 }
                                             }
-                                            
                                             sendSystemNotification(specialCount || 0, (statsRef.velocity24h || "0.0") + "/h");
                                             addLog("已發送測試通知");
                                         }} 
@@ -1972,6 +1921,24 @@
                                     </button>
                                 </div>
                                 
+                                <div className="border-t border-gray-800 pt-2 mb-2">
+                                    <label className="block text-[10px] text-gray-500 mb-1 flex items-center">
+                                        <Target className="w-3 h-3 mr-1" /> 🎯 設定目標發文數 (Target Alert)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="number" 
+                                            value={targetPostCount}
+                                            onChange={(e) => setTargetPostCount(e.target.value)}
+                                            placeholder="例如: 800" 
+                                            className="bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 w-full focus:outline-none focus:border-red-500" 
+                                        />
+                                    </div>
+                                    <div className="text-[9px] text-gray-600 mt-1">
+                                        當最新發文數大於或等於此數值時，將觸發警報音效與通知。
+                                    </div>
+                                </div>
+
                                 <div className="border-t border-gray-800 pt-2 mb-2">
                                     <label className="block text-[10px] text-gray-500 mb-1 flex items-center">
                                         <Languages className="w-3 h-3 mr-1" /> Google Translate API Key
@@ -2306,6 +2273,26 @@
                     
                     {/* Render Modal */}
                     <StatsDetailModal detail={selectedStatDetail} onClose={() => setSelectedStatDetail(null)} />
+
+                    {/* Target Alert Modal */}
+                    {showTargetAlert && (
+                        <div className="modal-backdrop">
+                             <div className="bg-red-900/90 border-2 border-red-500 rounded-xl p-6 shadow-2xl animate-pulse-red text-center w-full max-w-sm mx-4">
+                                <AlertTriangle className="w-16 h-16 text-white mx-auto mb-4 animate-bounce" />
+                                <h2 className="text-2xl font-bold text-white mb-2">⚠️ 目標達成警報</h2>
+                                <div className="text-red-200 text-sm mb-4">
+                                    目前時間: <span className="font-mono font-bold text-white">{formatTimeET(currentTime)}</span><br/>
+                                    已到達發文數: <span className="font-mono font-bold text-white text-lg">{specialCount}</span>
+                                </div>
+                                <button 
+                                    onClick={stopLoopAlarm}
+                                    className="bg-white text-red-900 font-bold py-3 px-8 rounded-full shadow-lg hover:bg-gray-200 transition transform active:scale-95"
+                                >
+                                    停止警報 (STOP)
+                                </button>
+                             </div>
+                        </div>
+                    )}
                 </div>
             );
         };
