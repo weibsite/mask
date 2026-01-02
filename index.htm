@@ -1319,8 +1319,8 @@
             const targetDate = useMemo(() => {
                 const now = new Date(); 
                 let year = now.getFullYear();
-                if (now.getMonth() === 0 && now.getDate() > 2) year++; 
-                const target = new Date(Date.UTC(year, 0, 2, 17, 0, 0)); 
+                if (now.getMonth() === 0 && now.getDate() > 6) year++; 
+                const target = new Date(Date.UTC(year, 0, 6, 17, 0, 0)); 
                 return target;
             }, []);
 
