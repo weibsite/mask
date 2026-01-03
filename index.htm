@@ -790,9 +790,11 @@
             const availableKeyDates = useMemo(() => keyDates.filter(d => !isFutureDate(d)), [keyDates]);
 
             useEffect(() => {
-                // If not synced with startDate prop yet or initially
                 if (availableKeyDates.length > 0) {
-                     // logic to pick most recent date if selectedDate is invalid can go here
+                     const isSelectedInList = availableKeyDates.some(d => d.toDateString() === selectedDate.toDateString());
+                     if (!isSelectedInList) {
+                         setSelectedDate(availableKeyDates[availableKeyDates.length - 1]);
+                     }
                 }
             }, [viewMonth, availableKeyDates]); 
 
@@ -814,7 +816,6 @@
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
             }, [selectedDate]);
 
-            // Heatmap Stats
             const getHistoricalStats = (targetDate, currentVal, dayIndex) => {
                 if (!targetDate || posts.length === 0) return { min:0, avg:0, max:0, isToday: false, isFuture: false };
                 const nowET = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
@@ -942,10 +943,16 @@
                     totalActual += validActual;
                     const stats = getHistoricalStats(d, validActual, dIdx);
                     
-                    // Always accumulate Projection, even if passed, to compare
-                    projMin += stats.min;
-                    projAvg += stats.avg;
-                    projMax += stats.max;
+                    if (stats.isFuture || stats.isToday) {
+                        projMin += stats.min;
+                        projAvg += stats.avg;
+                        projMax += stats.max;
+                    } else {
+                        // Past: use actual
+                        projMin += validActual;
+                        projAvg += validActual;
+                        projMax += validActual;
+                    }
                 });
                 
                 const result = { totalActual, proj: {min: projMin, avg: projAvg, max: projMax} };
@@ -1055,7 +1062,10 @@
                                          const colSum = 0; // Not needed for stats calc
                                          const stats = getHistoricalStats(targetDate, colSum, dIdx);
                                          
-                                         // Show projection for ALL columns now
+                                         if (!stats.isToday && !stats.isFuture) {
+                                             return <div key={dIdx} className="flex-1 text-center text-[9px] text-gray-600">-</div>;
+                                         }
+
                                          return (
                                              <div key={dIdx} className="flex-1 flex flex-col items-center justify-center leading-none text-[8px] font-mono">
                                                  <span className="text-red-400">{stats.max.toFixed(0)}</span>
@@ -1300,12 +1310,16 @@
             const [specialLastFetchTime, setSpecialLastFetchTime] = useState(null);
             const [loadingSpecial, setLoadingSpecial] = useState(false); 
             const [isOffline, setIsOffline] = useState(false); 
+            
+            // --- Fix for Request Overlap ---
             const prevSpecialCountRef = useRef(null);
-            const isFetchingSpecialRef = useRef(false); 
+            const isFetchingSpecialRef = useRef(false); // New Ref to lock fetch
+
             const [predictInput, setPredictInput] = useState(''); 
             const [parsedHours, setParsedHours] = useState(null);
             const [prediction, setPrediction] = useState(null);
             
+            // Helper for logging
             const addLog = (msg) => {
                 setInitLogs(prev => {
                     const newLogs = [...prev, `[${new Date().toLocaleTimeString('en-US', {hour12: false})}] ${msg}`];
@@ -1313,41 +1327,74 @@
                 });
             };
 
+            // Link Hover Handler
             const handleLinkHover = (e, url) => {
+                // Calculate position to keep it on screen
                 let x = e.clientX + 10;
                 let y = e.clientY + 20;
-                if (x + 320 > window.innerWidth) x = window.innerWidth - 330;
-                if (y + 240 > window.innerHeight) y = e.clientY - 250;
+                
+                // Adjust if too close to right edge
+                if (x + 320 > window.innerWidth) {
+                    x = window.innerWidth - 330;
+                }
+                // Adjust if too close to bottom
+                if (y + 240 > window.innerHeight) {
+                    y = e.clientY - 250;
+                }
+                
                 setPreview({ url, x, y });
             };
-            const handleLinkLeave = () => setPreview(null);
 
+            const handleLinkLeave = () => {
+                setPreview(null);
+            };
+
+            // NEW: Google Translation Logic (Direct)
             const translatePostsBatch = useCallback(async (postsToTranslate) => {
                 if (!googleApiKey || postsToTranslate.length === 0) return;
+                
+                // Filter out posts that are already translated or empty
                 const targets = postsToTranslate.filter(p => !googleTranslations[p.id] && p.content && p.content.trim() !== "");
                 if (targets.length === 0) return;
+
                 addLog(`正在翻譯 ${targets.length} 篇貼文...`);
+
                 try {
                     const url = `https://translation.googleapis.com/language/translate/v2?key=${googleApiKey}`;
+                    // Use direct fetch, no proxy
                     const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ q: targets.map(p => p.content), target: 'zh-TW', format: 'text' })
+                        body: JSON.stringify({
+                            q: targets.map(p => p.content),
+                            target: 'zh-TW',
+                            format: 'text'
+                        })
                     });
-                    if (!response.ok) throw new Error("Translation API Error");
+
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error?.message || "Translation API Error");
+                    }
+
                     const data = await response.json();
                     const newTranslations = {};
                     data.data.translations.forEach((t, i) => {
                         newTranslations[targets[i].id] = t.translatedText;
                     });
+
                     setGoogleTranslations(prev => ({...prev, ...newTranslations}));
                     addLog("Google 翻譯完成！");
+
                 } catch (error) {
                     addLog(`翻譯失敗: ${error.message}`);
+                    if (error.message.includes('referer') || error.message.includes('CORS')) {
+                         addLog("請檢查 Google API Key 限制 (HTTP Referrer)");
+                    }
+                    console.error("Google Translate Error:", error);
                 }
             }, [googleApiKey, googleTranslations]);
 
-            // Recalculate targetDate based on config
             const targetDate = useMemo(() => {
                 // Parse End Date from config or default
                 const endStr = config.endDate || "2026-01-06";
@@ -1358,8 +1405,13 @@
 
             const [hoursToTarget, setHoursToTarget] = useState(0);
 
+            // Updated Active Window Detection for Historical Stats
             const activeCycleType = useMemo(() => {
                 const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
+                const currentDay = now.getDay(); // 0-6 Sun-Sat
+                const currentHour = now.getHours();
+
+                // Logic: Find most recent Tue 12:00 and most recent Thu 12:00
                 const getRecentDay = (dayIndex) => {
                     const d = new Date(now);
                     d.setDate(d.getDate() - ((d.getDay() + 7 - dayIndex) % 7));
@@ -1369,26 +1421,32 @@
                     d.setHours(12, 0, 0, 0);
                     return d;
                 };
-                const lastTue = getRecentDay(2); 
-                const lastThu = getRecentDay(4); 
+
+                const lastTue = getRecentDay(2); // Tue
+                const lastThu = getRecentDay(4); // Thu
+                
                 return lastThu > lastTue ? 'thu' : 'tue';
             }, []);
 
             const currentActiveWindow = useMemo(() => {
                 const t = new Date();
                 const dayOffset = activeCycleType === 'thu' ? 4 : 2;
+                
                  const getRecentStart = (dayIndex) => {
                     const d = new Date(); 
                     d.setDate(d.getDate() - ((d.getDay() + 7 - dayIndex) % 7));
                      return d;
                 };
+                
                 const baseDate = getRecentStart(dayOffset);
+
                 const gridStartTimeMs = Date.UTC(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 5, 0, 0);
                 const activeStartMs = gridStartTimeMs + (12 * 3600000);
                 const activeEndMs = activeStartMs + (7 * 24 * 3600000);
                 return { gridStartTimeMs, activeStartMs, activeEndMs };
             }, [activeCycleType]);
 
+            // --- CRITICAL FIX: Define hoursSinceLast HERE ---
             let hoursSinceLast = 0;
             const lastPost = posts.length > 0 ? posts[0] : null;
             const lastPostTime = lastPost && lastPost.createdAt ? new Date(lastPost.createdAt) : null;
@@ -1396,6 +1454,7 @@
                 const diffMs = new Date() - lastPostTime;
                 hoursSinceLast = diffMs / (1000 * 60 * 60);
             }
+            // ------------------------------------------------
 
             useEffect(() => {
                 const timer = setInterval(() => {
