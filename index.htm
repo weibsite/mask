@@ -1565,7 +1565,7 @@
             const fetchFromApi = useCallback(async (retryAttempt = 0) => {
                 setLoading(true);
                 addLog(`Starting Main API Fetch... (Attempt ${retryAttempt + 1})`);
-                const corsURL = 'https://corsproxy.io/?'; 
+                const corsURL = 'https://corsproxy.io/?key=6d848867&url='; 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 20000);
 
