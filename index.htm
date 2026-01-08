@@ -1630,9 +1630,9 @@
                 isFetchingSpecialRef.current = true;
                 setLoadingSpecial(true);
 
-                // Dynamically build URL from config
-                const startStr = config.startDate || "2025-12-30";
-                const endStr = config.endDate || "2026-01-06";
+                // Dynamically build URL from config時間
+                const startStr = config.startDate || "2026-01-02";
+                const endStr = config.endDate || "2026-01-09";
                 const targetUrl = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startStr}T17:00:00.000Z&endDate=${endStr}T17:00:59.000Z`;
                 const proxyUrl = `https://corsproxy.io/?key=6d848867&url=${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
                 
