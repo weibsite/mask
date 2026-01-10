@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>進度計數器</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .touch-manipulation {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col">
+        <!-- Header -->
+        <div class="bg-blue-600 p-4 text-white text-center">
+            <h1 class="text-xl font-bold">進度追蹤計數器</h1>
+        </div>
+
+        <!-- Settings Section -->
+        <div class="p-4 bg-blue-50 grid grid-cols-2 gap-4 border-b border-gray-200">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">開始數字</label>
+                <input type="number" id="startInput" class="w-full p-2 rounded border border-gray-300 text-center focus:outline-none focus:border-blue-500" placeholder="例如: 141">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">結束數字 (選填)</label>
+                <input type="number" id="endInput" class="w-full p-2 rounded border border-gray-300 text-center focus:outline-none focus:border-blue-500" placeholder="例如: 150">
+            </div>
+        </div>
+
+        <!-- Main Display -->
+        <div class="flex-grow p-6 flex flex-col items-center justify-center space-y-4">
+            
+            <!-- Timer Display -->
+            <div class="text-gray-400 font-mono text-sm bg-gray-100 px-3 py-1 rounded-full">
+                計時: <span id="timerDisplay">00:00:00</span>
+            </div>
+
+            <!-- Current Number Big Display -->
+            <div class="text-center">
+                <div class="text-sm text-gray-500 mb-1">目前數字</div>
+                <div id="currentNumberDisplay" class="text-7xl font-bold text-gray-800 transition-all transform duration-100">0</div>
+            </div>
+
+            <!-- Remaining Count (Conditional) -->
+            <div id="remainingSection" class="hidden flexflex-col items-center">
+                <div class="text-red-500 font-bold text-xl bg-red-50 px-4 py-2 rounded-lg border border-red-100">
+                    還剩: <span id="remainingDisplay">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Button Section -->
+        <div class="p-6 pt-0">
+            <button id="incrementBtn" class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-6 rounded-xl shadow-lg text-2xl touch-manipulation transition-colors">
+                +1 增加
+            </button>
+            <div class="flex justify-between mt-4">
+                <button onclick="resetData()" class="text-xs text-red-400 underline hover:text-red-600">重置所有紀錄</button>
+                <button onclick="applySettings()" class="text-xs text-blue-400 underline hover:text-blue-600">更新設定</button>
+            </div>
+        </div>
+
+        <!-- Chart Section -->
+        <div class="bg-gray-50 p-4 border-t border-gray-200">
+            <h3 class="text-xs font-bold text-gray-500 uppercase mb-2">增加速度曲線 (時間 vs 數字)</h3>
+            <div class="h-40 w-full">
+                <canvas id="progressChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 狀態管理 ---
+        const STORAGE_KEY = 'counter_app_v1';
+        
+        let state = {
+            start: 0,
+            current: 0,
+            end: null, // null means not set
+            startTime: null, // timestamp
+            history: [] // Array of {time: timestamp, val: number}
+        };
+
+        // --- Chart.js 實例 ---
+        let chartInstance = null;
+
+        // --- 初始化 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            initChart();
+            renderUI();
+            
+            // 啟動計時器更新循環
+            setInterval(updateTimerDisplay, 1000);
+        });
+
+        // --- 核心邏輯 ---
+
+        function loadData() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    state = { ...state, ...parsed };
+                    
+                    // 填回 Input
+                    document.getElementById('startInput').value = state.start;
+                    if(state.end !== null) {
+                        document.getElementById('endInput').value = state.end;
+                    }
+                } catch (e) {
+                    console.error("讀取資料失敗", e);
+                }
+            } else {
+                // 預設值
+                document.getElementById('startInput').value = 0;
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        // 當使用者修改 Input 時，我們可以選擇是否立即更新，
+        // 這裡設計為點擊 "更新設定" 或按鈕觸發時檢查
+        function applySettings() {
+            const startVal = parseInt(document.getElementById('startInput').value) || 0;
+            const endValInput = document.getElementById('endInput').value;
+            const endVal = endValInput === '' ? null : parseInt(endValInput);
+
+            // 如果是第一次設定或重置，同步 current
+            if (state.history.length === 0 && state.current === 0) {
+                state.current = startVal;
+            }
+            
+            // 如果目前的數字小於新的開始數字 (例如重設範圍)，強制拉回開始數字
+            if (state.current < startVal) {
+                state.current = startVal;
+            }
+
+            state.start = startVal;
+            state.end = endVal;
+            
+            saveData();
+            renderUI();
+            alert('設定已更新');
+        }
+
+        document.getElementById('incrementBtn').addEventListener('click', () => {
+            const now = Date.now();
+
+            // 1. 如果是第一次點擊，開始計時
+            if (!state.startTime) {
+                state.startTime = now;
+                // 記錄初始點 (時間 0, 數值為點擊前的數值)
+                if (state.history.length === 0) {
+                    state.history.push({ time: now, val: state.current });
+                }
+            }
+
+            // 2. 數字加一
+            state.current++;
+
+            // 3. 記錄歷史 (用於圖表)
+            state.history.push({
+                time: now,
+                val: state.current
+            });
+
+            // 簡單動畫效果
+            const display = document.getElementById('currentNumberDisplay');
+            display.style.transform = "scale(1.2)";
+            setTimeout(() => display.style.transform = "scale(1)", 100);
+
+            // 4. 存檔與渲染
+            saveData();
+            renderUI();
+        });
+
+        function resetData() {
+            if(confirm('確定要清除所有進度並重置嗎？')) {
+                state = {
+                    start: 0,
+                    current: 0,
+                    end: null,
+                    startTime: null,
+                    history: []
+                };
+                
+                // 清空 Input，或重置為 0
+                document.getElementById('startInput').value = 0;
+                document.getElementById('endInput').value = '';
+                
+                localStorage.removeItem(STORAGE_KEY);
+                renderUI();
+            }
+        }
+
+        // --- UI 渲染 ---
+
+        function renderUI() {
+            // 顯示目前數字
+            document.getElementById('currentNumberDisplay').innerText = state.current;
+
+            // 處理結束數字與倒數
+            const endInputVal = document.getElementById('endInput').value; // 從 input 讀取最新狀態比較準
+            const remainingSection = document.getElementById('remainingSection');
+            
+            // 更新 state.end 以防 input 有變動但沒按更新設定 (簡單 UX 優化)
+            if (endInputVal !== '') {
+                state.end = parseInt(endInputVal);
+                const remaining = state.end - state.current;
+                document.getElementById('remainingDisplay').innerText = remaining;
+                remainingSection.classList.remove('hidden');
+                
+                // 如果達成目標
+                if (remaining <= 0) {
+                    document.getElementById('remainingDisplay').innerText = "完成！";
+                    document.getElementById('remainingDisplay').parentElement.classList.replace('bg-red-50', 'bg-green-50');
+                    document.getElementById('remainingDisplay').parentElement.classList.replace('text-red-500', 'text-green-600');
+                    document.getElementById('remainingDisplay').parentElement.classList.replace('border-red-100', 'border-green-200');
+                } else {
+                     // 復原樣式
+                    document.getElementById('remainingDisplay').parentElement.classList.add('bg-red-50', 'text-red-500', 'border-red-100');
+                    document.getElementById('remainingDisplay').parentElement.classList.remove('bg-green-50', 'text-green-600', 'border-green-200');
+                }
+            } else {
+                state.end = null;
+                remainingSection.classList.add('hidden');
+            }
+
+            updateTimerDisplay();
+            updateChart();
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById('timerDisplay');
+            
+            if (!state.startTime) {
+                timerEl.innerText = "尚未開始";
+                return;
+            }
+
+            const now = Date.now();
+            const diff = now - state.startTime;
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            const pad = (num) => num.toString().padStart(2, '0');
+            timerEl.innerText = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+        }
+
+        // --- 圖表邏輯 ---
+
+        function initChart() {
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '數值',
+                        data: [],
+                        borderColor: 'rgb(37, 99, 235)', // Blue-600
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3, // 曲線平滑度
+                        fill: true,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            display: false, // 隱藏 X 軸標籤以保持簡潔
+                            title: { display: true, text: '時間經過' }
+                        },
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart() {
+            if (!chartInstance) return;
+            if (state.history.length === 0) {
+                chartInstance.data.labels = [];
+                chartInstance.data.datasets[0].data = [];
+                chartInstance.update();
+                return;
+            }
+
+            // 準備數據
+            // 為了圖表好看，我們把時間轉成 "第 N 秒/分" 或者簡單的序列
+            // 這裡使用 "經過秒數" 作為 X 軸
+            const startT = state.startTime || state.history[0].time;
+            
+            const labels = state.history.map(pt => {
+                const sec = Math.floor((pt.time - startT) / 1000);
+                return sec + 's';
+            });
+            
+            const dataPoints = state.history.map(pt => pt.val);
+
+            chartInstance.data.labels = labels;
+            chartInstance.data.datasets[0].data = dataPoints;
+            chartInstance.update();
+        }
+
+    </script>
+</body>
+</html>
