@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>真實時間軌跡計數器</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .touch-manipulation {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col">
+        <!-- Header -->
+        <div class="bg-indigo-600 p-4 text-white text-center shadow-md z-10">
+            <h1 class="text-xl font-bold tracking-wider">速度軌跡計數器</h1>
+        </div>
+
+        <!-- Settings Section -->
+        <div class="p-4 bg-indigo-50 grid grid-cols-2 gap-4 border-b border-indigo-100">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">開始數字</label>
+                <input type="number" id="startInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 141">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">結束數字 (目標)</label>
+                <input type="number" id="endInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 150">
+            </div>
+        </div>
+
+        <!-- Main Display -->
+        <div class="flex-grow p-6 flex flex-col items-center justify-center space-y-2 relative">
+            
+            <!-- Timer Display -->
+            <div class="absolute top-4 right-4 text-xs font-mono text-gray-400">
+                經過時間: <span id="timerDisplay">00:00:00</span>
+            </div>
+
+            <!-- Remaining Count (Conditional) -->
+            <div id="remainingSection" class="hidden w-full mb-2">
+                 <div class="flex justify-between items-end mb-1 px-1">
+                    <span class="text-xs font-bold text-gray-400">進度</span>
+                    <span class="text-xs font-bold text-indigo-600">剩餘: <span id="remainingDisplay">0</span></span>
+                 </div>
+                 <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progressBar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                  </div>
+            </div>
+
+            <!-- Current Number Big Display -->
+            <div class="text-center py-4">
+                <div class="text-sm text-gray-400 mb-1 uppercase tracking-widest">目前數字</div>
+                <div id="currentNumberDisplay" class="text-8xl font-black text-gray-800 transition-all transform duration-75 leading-none">0</div>
+            </div>
+        </div>
+
+        <!-- Button Section -->
+        <div class="px-6 pb-2">
+            <button id="incrementBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-6 rounded-2xl shadow-lg shadow-indigo-200 text-3xl touch-manipulation transition-all transform active:scale-95 flex items-center justify-center gap-2">
+                <span>+1</span>
+                <span class="text-sm font-normal opacity-70">(點擊增加)</span>
+            </button>
+        </div>
+
+        <div class="px-6 pb-4 pt-2 flex justify-between items-center">
+            <button onclick="resetData()" class="text-xs text-red-400 hover:text-red-600 py-2 px-4 rounded border border-transparent hover:border-red-100 transition-colors">↺ 重置紀錄</button>
+            <button onclick="applySettings()" class="text-xs font-bold text-indigo-500 hover:text-indigo-700 py-2 px-4 rounded bg-indigo-50 hover:bg-indigo-100 transition-colors">更新設定</button>
+        </div>
+
+        <!-- Chart Section -->
+        <div class="bg-gray-50 p-4 border-t border-gray-200 h-48">
+            <div class="flex justify-between items-center mb-1">
+                <h3 class="text-[10px] font-bold text-gray-400 uppercase">增加速度曲線 (陡峭=速度快)</h3>
+            </div>
+            <div class="h-full w-full pb-4">
+                <canvas id="progressChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 狀態管理 ---
+        const STORAGE_KEY = 'counter_app_v2_time_axis';
+        
+        let state = {
+            start: 0,
+            current: 0,
+            end: null, 
+            startTime: null, // timestamp
+            // history 結構: [{ t: timestamp, v: value }]
+            history: [] 
+        };
+
+        // --- Chart.js 實例 ---
+        let chartInstance = null;
+
+        // --- 初始化 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            initChart();
+            renderUI();
+            
+            // 啟動計時器更新循環
+            setInterval(updateTimerDisplay, 1000);
+        });
+
+        // --- 核心邏輯 ---
+
+        function loadData() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    state = { ...state, ...parsed };
+                    
+                    // 填回 Input
+                    document.getElementById('startInput').value = state.start;
+                    if(state.end !== null) {
+                        document.getElementById('endInput').value = state.end;
+                    }
+                } catch (e) {
+                    console.error("讀取資料失敗", e);
+                }
+            } else {
+                // 預設值
+                document.getElementById('startInput').value = 0;
+                // 初始化 current
+                state.current = 0;
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        function applySettings() {
+            const startVal = parseInt(document.getElementById('startInput').value) || 0;
+            const endValInput = document.getElementById('endInput').value;
+            const endVal = endValInput === '' ? null : parseInt(endValInput);
+
+            // 邏輯修正：如果尚未開始任何記錄，將目前數字同步為開始數字
+            // 或者如果目前的數字小於新的開始數字，強制拉回
+            if (state.history.length === 0 || state.current < startVal) {
+                state.current = startVal;
+            }
+
+            state.start = startVal;
+            state.end = endVal;
+            
+            saveData();
+            renderUI();
+            
+            // 給予一點視覺反饋
+            const btn = document.querySelector('button[onclick="applySettings()"]');
+            const originalText = btn.innerText;
+            btn.innerText = "已更新!";
+            setTimeout(() => btn.innerText = originalText, 1000);
+        }
+
+        document.getElementById('incrementBtn').addEventListener('click', () => {
+            const now = Date.now();
+
+            // 1. 如果是第一次點擊，開始計時
+            if (!state.startTime) {
+                state.startTime = now;
+                // 插入起點：時間0，數值為當前值
+                // 這樣圖表才會從 0 秒開始畫
+                if (state.history.length === 0) {
+                     // 記錄「開始前」的狀態作為原點
+                    state.history.push({ t: now, v: state.current });
+                }
+            }
+
+            // 2. 數字加一
+            state.current++;
+
+            // 3. 記錄歷史
+            state.history.push({
+                t: now,
+                v: state.current
+            });
+
+            // 動畫
+            const display = document.getElementById('currentNumberDisplay');
+            display.style.transform = "scale(1.1)";
+            display.style.color = "#4f46e5"; // indigo-600
+            setTimeout(() => {
+                display.style.transform = "scale(1)";
+                display.style.color = "#1f2937"; // gray-800
+            }, 100);
+
+            // 4. 存檔與渲染
+            saveData();
+            renderUI();
+        });
+
+        function resetData() {
+            if(confirm('確定要清除所有進度並重置嗎？圖表將會清空。')) {
+                state = {
+                    start: parseInt(document.getElementById('startInput').value) || 0,
+                    current: parseInt(document.getElementById('startInput').value) || 0,
+                    end: null,
+                    startTime: null,
+                    history: []
+                };
+                
+                // 清空結束輸入框，或者保留依需求
+                // 這裡保留 Input 設定，只清除進度
+                
+                localStorage.removeItem(STORAGE_KEY);
+                renderUI();
+            }
+        }
+
+        // --- UI 渲染 ---
+
+        function renderUI() {
+            // 顯示數字
+            document.getElementById('currentNumberDisplay').innerText = state.current;
+
+            // 處理結束數字與倒數
+            // 再次確認 Input 值 (因為 User 可能打字了但沒按更新)
+            let endVal = state.end; 
+            const endInputVal = document.getElementById('endInput').value;
+            if(endInputVal !== '') endVal = parseInt(endInputVal);
+
+            const remainingSection = document.getElementById('remainingSection');
+            
+            if (endVal !== null && !isNaN(endVal)) {
+                remainingSection.classList.remove('hidden');
+                
+                const totalRange = endVal - state.start;
+                const progress = state.current - state.start;
+                const remaining = endVal - state.current;
+
+                document.getElementById('remainingDisplay').innerText = remaining;
+                
+                // 計算進度條百分比
+                let percent = 0;
+                if (totalRange > 0) {
+                    percent = (progress / totalRange) * 100;
+                    if (percent > 100) percent = 100;
+                    if (percent < 0) percent = 0;
+                }
+                document.getElementById('progressBar').style.width = `${percent}%`;
+
+                // 完成狀態
+                if (remaining <= 0) {
+                     document.getElementById('remainingDisplay').innerText = "完成";
+                     document.getElementById('remainingDisplay').parentElement.classList.add('text-green-500');
+                     document.getElementById('progressBar').classList.add('bg-green-500');
+                     document.getElementById('progressBar').classList.remove('bg-indigo-600');
+                } else {
+                     document.getElementById('remainingDisplay').parentElement.classList.remove('text-green-500');
+                     document.getElementById('progressBar').classList.remove('bg-green-500');
+                     document.getElementById('progressBar').classList.add('bg-indigo-600');
+                }
+
+            } else {
+                remainingSection.classList.add('hidden');
+            }
+
+            updateTimerDisplay();
+            updateChart();
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById('timerDisplay');
+            
+            if (!state.startTime) {
+                timerEl.innerText = "00:00:00";
+                return;
+            }
+
+            // 如果已經有歷史記錄，最後一次操作時間後也應該繼續跑，直到重置
+            // 這裡顯示的是「從開始到現在」的時間
+            const now = Date.now();
+            const diff = now - state.startTime;
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            const pad = (num) => num.toString().padStart(2, '0');
+            timerEl.innerText = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+        }
+
+        // --- 圖表邏輯 (使用 Scatter / Line with Linear Axis) ---
+
+        function initChart() {
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line', // 使用 line 但是配合 linear x-axis
+                data: {
+                    datasets: [{
+                        label: '數值',
+                        data: [], // 格式: {x: 0, y: 100}
+                        borderColor: '#4f46e5', // Indigo 600
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.1, // 線條稍微直一點，更能反映速度變化
+                        fill: true,
+                        pointRadius: 0, // 隱藏點，讓線條更流暢，除非 hover
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // 關閉動畫以提高響應速度
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `數字: ${context.parsed.y}`;
+                                },
+                                title: function(context) {
+                                    return `第 ${context[0].parsed.x.toFixed(1)} 秒`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear', // 關鍵：線性軸
+                            position: 'bottom',
+                            title: { 
+                                display: true, 
+                                text: '經過時間 (秒)',
+                                font: { size: 10 }
+                            },
+                            ticks: {
+                                maxTicksLimit: 6,
+                                font: { size: 10 }
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '數字',
+                                font: { size: 10 }
+                            },
+                             ticks: {
+                                font: { size: 10 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart() {
+            if (!chartInstance) return;
+            
+            if (state.history.length === 0) {
+                chartInstance.data.datasets[0].data = [];
+                chartInstance.update();
+                return;
+            }
+
+            const startT = state.startTime;
+            
+            // 轉換數據格式: X = (時間戳 - 開始時間) / 1000秒, Y = 數值
+            const dataPoints = state.history.map(pt => {
+                return {
+                    x: (pt.t - startT) / 1000, 
+                    y: pt.v
+                };
+            });
+
+            // 為了讓圖表總是顯示到「現在」，我們可以加一個隱形的點在現在的時間點嗎？
+            // 不，這樣會造成線條拉平。我們只畫出「有動作」的時間點。
+            // 但如果想要看「現在已經過了多久」，我們可以只更新 X 軸的 max。
+            // 這裡選擇只顯示點擊記錄，這樣線條斜率真實反映點擊當下的速度。
+
+            chartInstance.data.datasets[0].data = dataPoints;
+            
+            // 動態調整 Y 軸範圍，讓圖表好看一點
+            // chartInstance.options.scales.y.min = state.start; 
+            
+            chartInstance.update();
+        }
+
+    </script>
+</body>
+</html>
