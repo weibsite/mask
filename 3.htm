@@ -6,8 +6,8 @@
     <title>真實時間軌跡計數器</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js (使用穩定的 UMD 版本) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
         body {
@@ -28,14 +28,42 @@
         </div>
 
         <!-- Settings Section -->
-        <div class="p-4 bg-indigo-50 grid grid-cols-2 gap-4 border-b border-indigo-100">
-            <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">開始數字</label>
-                <input type="number" id="startInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 141">
+        <div class="p-4 bg-indigo-50 border-b border-indigo-100 space-y-4">
+            <!-- Row 1: Start & End -->
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">開始數字</label>
+                    <input type="number" id="startInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 0">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">結束數字 (目標)</label>
+                    <input type="number" id="endInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 150">
+                </div>
             </div>
-            <div>
-                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">結束數字 (目標)</label>
-                <input type="number" id="endInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如: 150">
+            
+            <!-- Row 2: Total Duration & Target Time -->
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">總時長 (DDHHMM)</label>
+                    <input type="text" id="totalDurationInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="例如 020000">
+                    <div class="text-[10px] text-gray-400 mt-1 text-center truncate">020000 代表 2天整</div>
+                </div>
+                <div class="relative">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">目標時間 (截止)</label>
+                    <input type="text" id="targetTimeInput" class="w-full p-2 rounded border border-indigo-200 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-mono" placeholder="HHMM">
+                    <div id="targetTimeHint" class="text-[10px] text-gray-400 mt-1 text-center truncate h-4"></div>
+                </div>
+            </div>
+
+            <!-- Prediction Badge (Full Width) -->
+            <div id="predictionBadge" class="hidden w-full bg-purple-100 text-purple-700 px-3 py-2 rounded-lg text-sm font-bold border border-purple-200 text-center flex flex-col gap-1">
+                <div class="flex justify-between w-full">
+                    <span>預測抵達目標時:</span>
+                    <span id="predictedNumber" class="text-lg">--</span>
+                </div>
+                <div id="calculatedElapsedHint" class="text-[10px] text-purple-400 text-right w-full border-t border-purple-200 pt-1 mt-1">
+                    <!-- Javascript will fill this: 已使用時間: 1天05時... -->
+                </div>
             </div>
         </div>
 
@@ -43,12 +71,12 @@
         <div class="flex-grow p-6 flex flex-col items-center justify-center space-y-2 relative">
             
             <!-- Timer Display -->
-            <div class="absolute top-4 right-4 text-xs font-mono text-gray-400">
-                經過時間: <span id="timerDisplay">00:00:00</span>
+            <div class="absolute top-4 right-4 text-xs font-mono text-gray-400 text-right">
+                <div>本次計時: <span id="timerDisplay">00:00:00</span></div>
             </div>
 
             <!-- Remaining Count (Conditional) -->
-            <div id="remainingSection" class="hidden w-full mb-2">
+            <div id="remainingSection" class="hidden w-full mb-2 mt-6">
                  <div class="flex justify-between items-end mb-1 px-1">
                     <span class="text-xs font-bold text-gray-400">進度</span>
                     <span class="text-xs font-bold text-indigo-600">剩餘: <span id="remainingDisplay">0</span></span>
@@ -81,7 +109,7 @@
         <!-- Chart Section -->
         <div class="bg-gray-50 p-4 border-t border-gray-200 h-48">
             <div class="flex justify-between items-center mb-1">
-                <h3 class="text-[10px] font-bold text-gray-400 uppercase">增加速度曲線 (陡峭=速度快)</h3>
+                <h3 class="text-[10px] font-bold text-gray-400 uppercase">增加速度曲線 (實線:目前 / 虛線:預測)</h3>
             </div>
             <div class="h-full w-full pb-4">
                 <canvas id="progressChart"></canvas>
@@ -91,14 +119,15 @@
 
     <script>
         // --- 狀態管理 ---
-        const STORAGE_KEY = 'counter_app_v2_time_axis';
+        const STORAGE_KEY = 'counter_app_v5_total_duration';
         
         let state = {
             start: 0,
             current: 0,
             end: null, 
-            startTime: null, // timestamp
-            // history 結構: [{ t: timestamp, v: value }]
+            targetTimeStr: '', 
+            totalDurationStr: '', // "020000" (2 days)
+            startTime: null, // timestamp of THIS session start
             history: [] 
         };
 
@@ -111,8 +140,11 @@
             initChart();
             renderUI();
             
-            // 啟動計時器更新循環
-            setInterval(updateTimerDisplay, 1000);
+            // 啟動計時器更新循環 (每秒更新顯示與預測)
+            setInterval(() => {
+                updateTimerDisplay();
+                updatePrediction(); 
+            }, 1000);
         });
 
         // --- 核心邏輯 ---
@@ -129,13 +161,20 @@
                     if(state.end !== null) {
                         document.getElementById('endInput').value = state.end;
                     }
+                    if(state.targetTimeStr) {
+                        document.getElementById('targetTimeInput').value = state.targetTimeStr;
+                    }
+                    // 兼容舊版 elapsedStr 或新版 totalDurationStr
+                    if(state.totalDurationStr) {
+                        document.getElementById('totalDurationInput').value = state.totalDurationStr;
+                    } else if (parsed.elapsedStr) {
+                        // 如果有舊的資料，暫時不填入，因為邏輯變了
+                    }
                 } catch (e) {
                     console.error("讀取資料失敗", e);
                 }
             } else {
-                // 預設值
                 document.getElementById('startInput').value = 0;
-                // 初始化 current
                 state.current = 0;
             }
         }
@@ -148,20 +187,21 @@
             const startVal = parseInt(document.getElementById('startInput').value) || 0;
             const endValInput = document.getElementById('endInput').value;
             const endVal = endValInput === '' ? null : parseInt(endValInput);
+            const targetTimeStr = document.getElementById('targetTimeInput').value.trim();
+            const totalDurationStr = document.getElementById('totalDurationInput').value.trim();
 
-            // 邏輯修正：如果尚未開始任何記錄，將目前數字同步為開始數字
-            // 或者如果目前的數字小於新的開始數字，強制拉回
             if (state.history.length === 0 || state.current < startVal) {
                 state.current = startVal;
             }
 
             state.start = startVal;
             state.end = endVal;
+            state.targetTimeStr = targetTimeStr;
+            state.totalDurationStr = totalDurationStr;
             
             saveData();
             renderUI();
             
-            // 給予一點視覺反饋
             const btn = document.querySelector('button[onclick="applySettings()"]');
             const originalText = btn.innerText;
             btn.innerText = "已更新!";
@@ -171,21 +211,15 @@
         document.getElementById('incrementBtn').addEventListener('click', () => {
             const now = Date.now();
 
-            // 1. 如果是第一次點擊，開始計時
             if (!state.startTime) {
                 state.startTime = now;
-                // 插入起點：時間0，數值為當前值
-                // 這樣圖表才會從 0 秒開始畫
                 if (state.history.length === 0) {
-                     // 記錄「開始前」的狀態作為原點
                     state.history.push({ t: now, v: state.current });
                 }
             }
 
-            // 2. 數字加一
             state.current++;
 
-            // 3. 記錄歷史
             state.history.push({
                 t: now,
                 v: state.current
@@ -194,43 +228,189 @@
             // 動畫
             const display = document.getElementById('currentNumberDisplay');
             display.style.transform = "scale(1.1)";
-            display.style.color = "#4f46e5"; // indigo-600
+            display.style.color = "#4f46e5"; 
             setTimeout(() => {
                 display.style.transform = "scale(1)";
-                display.style.color = "#1f2937"; // gray-800
+                display.style.color = "#1f2937";
             }, 100);
 
-            // 4. 存檔與渲染
             saveData();
             renderUI();
         });
 
         function resetData() {
-            if(confirm('確定要清除所有進度並重置嗎？圖表將會清空。')) {
+            if(confirm('確定要清除所有進度並重置嗎？\n(設定值會保留，但計數與圖表會清空)')) {
                 state = {
                     start: parseInt(document.getElementById('startInput').value) || 0,
                     current: parseInt(document.getElementById('startInput').value) || 0,
                     end: null,
+                    targetTimeStr: document.getElementById('targetTimeInput').value,
+                    totalDurationStr: document.getElementById('totalDurationInput').value,
                     startTime: null,
                     history: []
                 };
-                
-                // 清空結束輸入框，或者保留依需求
-                // 這裡保留 Input 設定，只清除進度
                 
                 localStorage.removeItem(STORAGE_KEY);
                 renderUI();
             }
         }
 
-        // --- UI 渲染 ---
+        // --- 輔助函數 ---
+
+        function parseTargetTimestamp(inputStr) {
+            if (!inputStr) return null;
+            let clean = inputStr.replace(/[^0-9]/g, '');
+            if (clean.length === 3) clean = '0' + clean;
+            if (clean.length !== 4) return null;
+
+            const hh = parseInt(clean.substring(0, 2));
+            const mm = parseInt(clean.substring(2, 4));
+            if (hh > 23 || mm > 59) return null;
+
+            const now = new Date();
+            const target = new Date();
+            target.setHours(hh, mm, 0, 0);
+
+            // 如果該時間點已經過了，預設是明天
+            // (除非使用者真的要設今天的過去時間，但通常是設截止時間)
+            if (target.getTime() <= now.getTime()) {
+                target.setDate(target.getDate() + 1);
+            }
+            return target.getTime();
+        }
+
+        // 解析 DDHHMM 或 HHMM 為毫秒
+        function parseDurationStr(str) {
+            if (!str) return 0;
+            let s = str.replace(/[^0-9]/g, '');
+            if (s.length === 0) return 0;
+
+            let d = 0, h = 0, m = 0;
+
+            if (s.length <= 4) {
+                // HHMM
+                m = parseInt(s.slice(-2));
+                if (s.length > 2) {
+                    h = parseInt(s.slice(0, -2));
+                }
+            } else {
+                // DDHHMM
+                m = parseInt(s.slice(-2));
+                h = parseInt(s.slice(-4, -2));
+                d = parseInt(s.slice(0, -4));
+            }
+
+            return ((d * 24 + h) * 60 + m) * 60 * 1000;
+        }
+
+        function formatDuration(ms) {
+            if (ms < 0) ms = 0;
+            const totalSec = Math.floor(ms / 1000);
+            const d = Math.floor(totalSec / (3600 * 24));
+            const h = Math.floor((totalSec % (3600 * 24)) / 3600);
+            const m = Math.floor((totalSec % 3600) / 60);
+            const s = totalSec % 60;
+            
+            const pad = (n) => n.toString().padStart(2, '0');
+            
+            if (d > 0) return `${d}天 ${pad(h)}:${pad(m)}:${pad(s)}`;
+            return `${pad(h)}:${pad(m)}:${pad(s)}`;
+        }
+
+        // --- UI 渲染與預測邏輯 ---
+
+        function updatePrediction() {
+            const targetTs = parseTargetTimestamp(state.targetTimeStr);
+            const totalDurationMs = parseDurationStr(state.totalDurationStr);
+            const badge = document.getElementById('predictionBadge');
+            const hint = document.getElementById('targetTimeHint');
+            const calculatedHint = document.getElementById('calculatedElapsedHint');
+            
+            // 目標時間文字提示
+            if (targetTs) {
+                hint.innerText = `目標: ${new Date(targetTs).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+            } else {
+                hint.innerText = '';
+            }
+
+            // 如果沒有足夠資訊，隱藏預測
+            // 必須要有目標時間，且 (有總時長 OR 已經開始計時)
+            if (!targetTs || (!totalDurationMs && (!state.startTime || state.history.length < 1))) {
+                badge.classList.add('hidden');
+                if(chartInstance && chartInstance.data.datasets[1]) {
+                    chartInstance.data.datasets[1].data = [];
+                    chartInstance.update('none');
+                }
+                return;
+            }
+
+            const now = Date.now();
+            const sessionElapsed = state.startTime ? (now - state.startTime) : 0;
+            
+            // --- 核心邏輯：計算「已經歷時間 (Effective Elapsed)」 ---
+            let effectiveElapsed = 0;
+
+            // 1. 如果有設定總時長，則使用倒扣邏輯
+            //    總時長 - (目標時間 - 現在) = 從開始到現在的總時間
+            if (totalDurationMs > 0 && targetTs) {
+                const timeRemaining = targetTs - now;
+                effectiveElapsed = totalDurationMs - timeRemaining;
+                
+                // 顯示計算出來的經歷時間給使用者確認
+                calculatedHint.innerText = `已使用總時間: ${formatDuration(effectiveElapsed)}`;
+                
+                // 防呆：如果還沒到開始時間 (effectiveElapsed < 0)，速率無法計算
+                if (effectiveElapsed <= 0) effectiveElapsed = 0;
+            } 
+            // 2. 如果沒設定總時長，則退回使用「本次 Session 時間」
+            else if (sessionElapsed > 0) {
+                 // 這裡只算本次增量
+                 // 但為了保持一致性，如果只依賴 Session，我們通常無法得知 Past Context
+                 // 所以這種情況下 rate 計算會使用 sessionGained
+                 effectiveElapsed = sessionElapsed;
+                 calculatedHint.innerText = `僅計算本次時間`;
+            }
+
+            // 計算距離目標還有多久
+            const msUntilTarget = targetTs - now;
+
+            if (msUntilTarget <= 0) {
+                badge.classList.remove('hidden');
+                document.getElementById('predictedNumber').innerText = "時間到";
+                return;
+            }
+
+            // --- 速率計算 ---
+            let rate = 0; // items per ms
+            
+            if (effectiveElapsed > 0) {
+                if (totalDurationMs > 0) {
+                    // 如果是用總時長推算的，分母是「從專案開始到現在」
+                    // 分子應該是「目前的總進度 (state.current)」
+                    // 假設總時長是對應整個 state.current 的累積過程
+                    rate = state.current / effectiveElapsed;
+                } else {
+                    // 如果只有本次 session，分子是「本次增量」
+                    const sessionGained = state.current - state.start;
+                    rate = sessionGained / sessionElapsed;
+                }
+            }
+
+            // 預測增加量
+            const predictedGain = rate * msUntilTarget;
+            const predictedTotal = Math.floor(state.current + predictedGain);
+
+            // UI 顯示
+            badge.classList.remove('hidden');
+            document.getElementById('predictedNumber').innerText = predictedTotal;
+
+            // 更新圖表虛線
+            updateChartPredictionLine(now, targetTs, state.current, predictedTotal);
+        }
 
         function renderUI() {
-            // 顯示數字
             document.getElementById('currentNumberDisplay').innerText = state.current;
 
-            // 處理結束數字與倒數
-            // 再次確認 Input 值 (因為 User 可能打字了但沒按更新)
             let endVal = state.end; 
             const endInputVal = document.getElementById('endInput').value;
             if(endInputVal !== '') endVal = parseInt(endInputVal);
@@ -246,7 +426,6 @@
 
                 document.getElementById('remainingDisplay').innerText = remaining;
                 
-                // 計算進度條百分比
                 let percent = 0;
                 if (totalRange > 0) {
                     percent = (progress / totalRange) * 100;
@@ -255,7 +434,6 @@
                 }
                 document.getElementById('progressBar').style.width = `${percent}%`;
 
-                // 完成狀態
                 if (remaining <= 0) {
                      document.getElementById('remainingDisplay').innerText = "完成";
                      document.getElementById('remainingDisplay').parentElement.classList.add('text-green-500');
@@ -266,13 +444,13 @@
                      document.getElementById('progressBar').classList.remove('bg-green-500');
                      document.getElementById('progressBar').classList.add('bg-indigo-600');
                 }
-
             } else {
                 remainingSection.classList.add('hidden');
             }
 
             updateTimerDisplay();
-            updateChart();
+            updateChartData();
+            updatePrediction();
         }
 
         function updateTimerDisplay() {
@@ -283,92 +461,79 @@
                 return;
             }
 
-            // 如果已經有歷史記錄，最後一次操作時間後也應該繼續跑，直到重置
-            // 這裡顯示的是「從開始到現在」的時間
             const now = Date.now();
-            const diff = now - state.startTime;
-
-            const hours = Math.floor(diff / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-            const pad = (num) => num.toString().padStart(2, '0');
-            timerEl.innerText = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+            const sessionMs = now - state.startTime;
+            timerEl.innerText = formatDuration(sessionMs);
         }
 
-        // --- 圖表邏輯 (使用 Scatter / Line with Linear Axis) ---
+        // --- 圖表邏輯 ---
 
         function initChart() {
+             if (typeof Chart === 'undefined') {
+                console.error('Chart.js Library not loaded yet.');
+                return;
+            }
             const ctx = document.getElementById('progressChart').getContext('2d');
             chartInstance = new Chart(ctx, {
-                type: 'line', // 使用 line 但是配合 linear x-axis
+                type: 'line',
                 data: {
-                    datasets: [{
-                        label: '數值',
-                        data: [], // 格式: {x: 0, y: 100}
-                        borderColor: '#4f46e5', // Indigo 600
-                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.1, // 線條稍微直一點，更能反映速度變化
-                        fill: true,
-                        pointRadius: 0, // 隱藏點，讓線條更流暢，除非 hover
-                        pointHoverRadius: 4
-                    }]
+                    datasets: [
+                        {
+                            label: '實際進度',
+                            data: [],
+                            borderColor: '#4f46e5',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: true,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        },
+                        {
+                            label: '預測趨勢',
+                            data: [],
+                            borderColor: '#9333ea',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    animation: false, // 關閉動畫以提高響應速度
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
-                    },
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
-                                    return `數字: ${context.parsed.y}`;
-                                },
                                 title: function(context) {
-                                    return `第 ${context[0].parsed.x.toFixed(1)} 秒`;
+                                    return `第 ${context[0].parsed.x.toFixed(0)} 秒`;
                                 }
                             }
                         }
                     },
                     scales: {
                         x: {
-                            type: 'linear', // 關鍵：線性軸
+                            type: 'linear',
                             position: 'bottom',
-                            title: { 
-                                display: true, 
-                                text: '經過時間 (秒)',
-                                font: { size: 10 }
-                            },
-                            ticks: {
-                                maxTicksLimit: 6,
-                                font: { size: 10 }
-                            }
+                            title: { display: true, text: '本次經過時間 (秒)', font: { size: 10 } },
+                            ticks: { maxTicksLimit: 6, font: { size: 10 } }
                         },
                         y: {
                             beginAtZero: false,
-                            title: {
-                                display: true,
-                                text: '數字',
-                                font: { size: 10 }
-                            },
-                             ticks: {
-                                font: { size: 10 }
-                            }
+                            title: { display: true, text: '數字', font: { size: 10 } }
                         }
                     }
                 }
             });
         }
 
-        function updateChart() {
+        function updateChartData() {
             if (!chartInstance) return;
-            
             if (state.history.length === 0) {
                 chartInstance.data.datasets[0].data = [];
                 chartInstance.update();
@@ -376,26 +541,28 @@
             }
 
             const startT = state.startTime;
-            
-            // 轉換數據格式: X = (時間戳 - 開始時間) / 1000秒, Y = 數值
-            const dataPoints = state.history.map(pt => {
-                return {
-                    x: (pt.t - startT) / 1000, 
-                    y: pt.v
-                };
-            });
-
-            // 為了讓圖表總是顯示到「現在」，我們可以加一個隱形的點在現在的時間點嗎？
-            // 不，這樣會造成線條拉平。我們只畫出「有動作」的時間點。
-            // 但如果想要看「現在已經過了多久」，我們可以只更新 X 軸的 max。
-            // 這裡選擇只顯示點擊記錄，這樣線條斜率真實反映點擊當下的速度。
+            const dataPoints = state.history.map(pt => ({
+                x: (pt.t - startT) / 1000, 
+                y: pt.v
+            }));
 
             chartInstance.data.datasets[0].data = dataPoints;
-            
-            // 動態調整 Y 軸範圍，讓圖表好看一點
-            // chartInstance.options.scales.y.min = state.start; 
-            
             chartInstance.update();
+        }
+
+        function updateChartPredictionLine(now, targetTs, currentVal, predictedVal) {
+            if (!chartInstance || !state.startTime) return;
+            
+            const currentX = (now - state.startTime) / 1000;
+            const targetX = (targetTs - state.startTime) / 1000;
+            
+            const predictionPoints = [
+                { x: currentX, y: currentVal },
+                { x: targetX, y: predictedVal }
+            ];
+
+            chartInstance.data.datasets[1].data = predictionPoints;
+            chartInstance.update('none');
         }
 
     </script>
