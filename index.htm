@@ -1572,7 +1572,7 @@
                     setPrediction(null);
                 }
             }, [posts, parsedHours, specialCount]);
-
+                    // 應該是90天資料
             const fetchFromApi = useCallback(async (retryAttempt = 0) => {
                 setLoading(true);
                 addLog(`Starting Main API Fetch... (Attempt ${retryAttempt + 1})`);
