@@ -1377,7 +1377,7 @@
                 addLog("正在下載自訂追蹤資料 (設定區間)...");
                 
                 try {
-                    // Use CORS proxy
+                    // Use CORS proxy 自訂連結
                     const target = config.customDataUrl;
                     const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(target)}&_t=${Date.now()}`;
                     
@@ -1737,14 +1737,22 @@
                 savedCallback.current = fetchSpecialData;
             }, [fetchSpecialData]);
 
+            // --- CRITICAL CHANGE: Dynamic Interval Logic ---
+            // If customDataUrl is set -> 1000ms (1s)
+            // If customDataUrl is NOT set (using default CORS API) -> 30000ms (30s)
             useEffect(() => {
                 function tick() {
                     savedCallback.current();
                 }
-                // --- CRITICAL CHANGE: 1000ms Interval ---
-                const id = setInterval(tick, 1000);
+                
+                const hasCustomUrl = config.customDataUrl && config.customDataUrl.trim() !== "";
+                const intervalTime = hasCustomUrl ? 1000 : 30000;
+                
+                addLog(`Polling Rate updated: ${intervalTime/1000}s`);
+                
+                const id = setInterval(tick, intervalTime);
                 return () => clearInterval(id);
-            }, []); 
+            }, [config.customDataUrl]); 
 
 
             // Target Alert Check
