@@ -1576,7 +1576,7 @@
             const fetchFromApi = useCallback(async (retryAttempt = 0) => {
                 setLoading(true);
                 addLog(`Starting Main API Fetch... (Attempt ${retryAttempt + 1})`);
-                const corsURL = 'https://corsproxy.io/?key=6d848867&url='; 
+                const corsURL = 'https://corsproxy.io/?url='; 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 20000);
 
@@ -1658,7 +1658,7 @@
                     targetUrl = `https://xtracker.polymarket.com/api/users/elonmusk/posts?startDate=${startStr}T17:00:00.000Z&endDate=${endStr}T17:00:59.000Z`;
                 }
 
-                const proxyUrl = `https://corsproxy.io/?key=6d848867&url=${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
+                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}&_t=${Date.now()}`;
                 
                 try {
                     const response = await fetch(proxyUrl, {
