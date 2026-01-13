@@ -137,6 +137,24 @@
             z-index: 10;
             border: 2px solid #fff !important;
         }
+        
+        /* New: Current Minute Cursor Animation */
+        @keyframes flash-bar {
+            0% { opacity: 0.4; height: 30%; background-color: rgba(255,255,255,0.8); box-shadow: 0 0 2px rgba(255,255,255,0.5); }
+            50% { opacity: 1; height: 100%; background-color: #fff; box-shadow: 0 0 6px rgba(255,255,255,1); }
+            100% { opacity: 0.4; height: 30%; background-color: rgba(255,255,255,0.8); box-shadow: 0 0 2px rgba(255,255,255,0.5); }
+        }
+        .current-minute-cursor {
+            position: absolute;
+            bottom: 0;
+            width: 2px;
+            background-color: white;
+            z-index: 30; /* Higher than regular minute bars */
+            animation: flash-bar 1.5s infinite ease-in-out;
+            pointer-events: none;
+            border-radius: 1px;
+        }
+
         .heat-cell-future-red {
             background-color: #1a0303; /* Very Dark Red */
             color: #450a0a;
@@ -930,7 +948,7 @@
                 if (cellTimeMs < activeStartMs || cellTimeMs >= activeEndMs) return "bg-[#111] border border-[#222] text-[#333]";
                 
                 // Active Window Logic
-                if (val >= 10) return "bg-[#34d399] text-black font-black border-white"; // 10+ (Bright Green/Neon)
+                if (val >= 10) return "bg-[#34d399] text-white font-black border-white"; // 10+ (Bright Green/Neon)
                 if (val > 0) return "bg-[#059669] text-white font-bold border-emerald-400"; // 1-9 (Medium Green)
                 
                 // Default / 0 (Dark Green)
@@ -1036,6 +1054,9 @@
                                                 // Apply class based on time
                                                 const cls = getCellClass(val, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs, dIdx, hIdx);
                                                 
+                                                // Determine if this is the "Current" cell
+                                                const isCurrentTimeCell = currentCell && currentCell.dayIdx === dIdx && currentCell.hourIdx === hIdx;
+
                                                 return (
                                                     <div key={dIdx} className={`flex-1 mx-[1px] rounded-sm heat-cell ${cls}`}>
                                                         {/* Render Minute Lines */}
@@ -1066,9 +1087,18 @@
                                                                 />
                                                             )
                                                         })}
+                                                        
+                                                        {/* New: Current Minute Flashing Bar */}
+                                                        {isCurrentTimeCell && (
+                                                            <div 
+                                                                className="current-minute-cursor"
+                                                                style={{ left: `${(currentTime.getMinutes() / 60) * 100}%` }}
+                                                            />
+                                                        )}
+
                                                         {/* Number Overlay */}
                                                         {val > 0 && (
-                                                            <span className="relative z-10 w-full h-full flex items-center justify-center text-[18px] leading-none font-black drop-shadow-md">
+                                                            <span className="relative z-10 w-full h-full flex items-center justify-center text-[14px] leading-none font-black drop-shadow-md">
                                                                 {val}
                                                             </span>
                                                         )}
