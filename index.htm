@@ -111,51 +111,36 @@
         /* Heatmap Table */
         .heat-cell {
             font-family: monospace;
-            font-size: 9px; /* Reduced font size */
-            height: 14px;   /* Reduced height to remove scroll need */
+            height: 25px;   /* Fixed height for alignment */
             display: flex;
             align-items: center;
             justify-content: center;
             border: 1px solid #222;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.2s;
         }
         .heat-cell-inactive {
-            background-color: #022c22; /* Dark Emerald (Modified) */
+            background-color: #0c1512; /* Darker Emerald Base */
             color: #065f46;
             border-color: #064e3b;
-        }
-        .heat-cell-0 {
-            background-color: #064e3b; /* Emerald 900 */
-            color: #6ee7b7;
-        }
-        .heat-cell-active {
-            background-color: #059669; /* Emerald 600 */
-            color: white;
-        }
-        .heat-cell-hot {
-            background-color: #34d399; /* Emerald 400 */
-            color: #fff;
-            font-weight: bold;
-            text-shadow: 0 0 2px rgba(0,0,0,0.5);
         }
         
         /* New Heatmap Styles */
         @keyframes breathe {
-            0% { opacity: 0.6; box-shadow: 0 0 2px #34d399; border-color: #34d399; }
-            50% { opacity: 1; box-shadow: 0 0 8px #34d399; border-color: #fff; }
-            100% { opacity: 0.6; box-shadow: 0 0 2px #34d399; border-color: #34d399; }
+            0% { box-shadow: inset 0 0 2px #34d399; border-color: #34d399; }
+            50% { box-shadow: inset 0 0 10px #34d399; border-color: #fff; }
+            100% { box-shadow: inset 0 0 2px #34d399; border-color: #34d399; }
         }
         .heat-cell-now {
             animation: breathe 2s infinite ease-in-out;
-            background-color: #059669; 
             z-index: 10;
-            border: 1px solid #fff;
-            color: white;
-            font-weight: bold;
+            border: 2px solid #fff !important;
         }
         .heat-cell-future-red {
-            background-color: #270606; /* Very Dark Red */
-            color: #5c1818;
-            border-color: #450a0a;
+            background-color: #1a0303; /* Very Dark Red */
+            color: #450a0a;
+            border-color: #2b0505;
         }
 
         /* Chart Tooltip */
@@ -894,7 +879,8 @@
                 if (!activeWindow) return null;
                 const { gridStartTimeMs, activeStartMs, activeEndMs } = activeWindow;
                 const oneDay = 24 * 60 * 60 * 1000;
-                const grid = Array(24).fill(0).map(() => Array(8).fill(0));
+                // Updated: grid now stores object with total count and minute-level data
+                const grid = Array(24).fill(0).map(() => Array(8).fill(null).map(() => ({ total: 0, mins: {} })));
                 
                 posts.forEach(p => {
                     const t = new Date(p.createdAt).getTime();
@@ -903,7 +889,13 @@
                         const diffHours = Math.floor(diffMs / 3600000);
                         const dayIdx = Math.floor(diffHours / 24);
                         const hourIdx = diffHours % 24;
-                        if (dayIdx >= 0 && dayIdx < 8) grid[hourIdx][dayIdx]++;
+                        if (dayIdx >= 0 && dayIdx < 8) {
+                            const cell = grid[hourIdx][dayIdx];
+                            cell.total++;
+                            // Get minute within the hour
+                            const m = new Date(p.createdAt).getMinutes();
+                            cell.mins[m] = (cell.mins[m] || 0) + 1;
+                        }
                     }
                 });
                 const headers = [];
@@ -936,9 +928,13 @@
                  if (cellTimeMs > currentTime.getTime()) return "heat-cell-future-red";
 
                 if (cellTimeMs < activeStartMs || cellTimeMs >= activeEndMs) return "bg-[#111] border border-[#222] text-[#333]";
-                if (val === 0) return "heat-cell-inactive text-gray-700";
-                if (val >= 10) return "heat-cell-hot";
-                return "bg-emerald-800 text-emerald-100";
+                
+                // Active Window Logic
+                if (val >= 10) return "bg-[#34d399] text-black font-black border-white"; // 10+ (Bright Green/Neon)
+                if (val > 0) return "bg-[#059669] text-white font-bold border-emerald-400"; // 1-9 (Medium Green)
+                
+                // Default / 0 (Dark Green)
+                return "bg-[#022c22] text-[#064e3b] border-emerald-900/50"; 
             };
 
             const summaryData = useMemo(() => {
@@ -951,7 +947,7 @@
                     const isFuture = isFutureDate(d);
                     const colSum = gridData.grid.reduce((acc, row, hIdx) => {
                          const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                         if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
+                         if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx].total;
                          return acc;
                     }, 0);
                     const validActual = isFuture ? 0 : colSum;
@@ -1028,24 +1024,54 @@
                                     // Highlight hour label if this row corresponds to current hour of active day
                                     const isCurrentHourRow = currentCell && currentCell.hourIdx === hIdx;
                                     const labelClass = isCurrentHourRow 
-                                        ? "w-8 text-[9px] text-right pr-2 leading-[15px] font-mono flex-shrink-0 text-white font-bold glow-text"
-                                        : "w-8 text-[9px] text-gray-600 text-right pr-2 leading-[15px] font-mono flex-shrink-0";
+                                        ? "w-8 text-[9px] text-right pr-2 leading-[25px] font-mono flex-shrink-0 text-white font-bold glow-text"
+                                        : "w-8 text-[9px] text-gray-600 text-right pr-2 leading-[25px] font-mono flex-shrink-0";
                                     
                                     return (
-                                        <div key={hIdx} className="flex h-[15px] mb-[1px]">
+                                        <div key={hIdx} className="flex h-[26px] mb-[1px]">
                                             <div className={labelClass}>{hIdx.toString().padStart(2, '0')}:00</div>
-                                            {row.map((val, dIdx) => {
+                                            {row.map((cellData, dIdx) => {
                                                 const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                                const displayVal = val; 
+                                                const val = cellData.total; 
                                                 // Apply class based on time
-                                                const cls = getCellClass(displayVal, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs, dIdx, hIdx);
-                                                const isActive = cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs;
-                                                // Future cells show 0 or nothing? Usually nothing if 0
-                                                const showVal = displayVal > 0 && isActive ? displayVal : '';
-
+                                                const cls = getCellClass(val, cellTimeMs, gridData.activeStartMs, gridData.activeEndMs, dIdx, hIdx);
+                                                
                                                 return (
                                                     <div key={dIdx} className={`flex-1 mx-[1px] rounded-sm heat-cell ${cls}`}>
-                                                        {showVal}
+                                                        {/* Render Minute Lines */}
+                                                        {Object.entries(cellData.mins).map(([mStr, count]) => {
+                                                            const m = parseInt(mStr);
+                                                            const leftPos = (m / 60) * 100;
+                                                            let barColor = 'bg-orange-400';
+                                                            let zIndex = 0;
+                                                            if (count > 1) { 
+                                                                barColor = 'bg-red-500 shadow-[0_0_2px_rgba(239,68,68,0.8)]'; // High density
+                                                                zIndex = 1;
+                                                            }
+                                                            if (count > 2) { 
+                                                                barColor = 'bg-white shadow-[0_0_4px_rgba(255,255,255,1)]'; // Super density
+                                                                zIndex = 2;
+                                                            }
+
+                                                            return (
+                                                                <div key={m}
+                                                                     className={`absolute bottom-0 ${barColor}`}
+                                                                     style={{
+                                                                         left: `${leftPos}%`,
+                                                                         width: '2px', // Minimum width for visibility
+                                                                         height: '100%',
+                                                                         opacity: 0.9,
+                                                                         zIndex: zIndex
+                                                                     }}
+                                                                />
+                                                            )
+                                                        })}
+                                                        {/* Number Overlay */}
+                                                        {val > 0 && (
+                                                            <span className="relative z-10 w-full h-full flex items-center justify-center text-[18px] leading-none font-black drop-shadow-md">
+                                                                {val}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 );
                                             })}
@@ -1058,7 +1084,7 @@
                                          const isFuture = isFutureDate(gridData.headers[dIdx]);
                                          const colSum = gridData.grid.reduce((acc, row, hIdx) => {
                                              const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx].total;
                                              return acc;
                                          }, 0);
                                          return <div key={dIdx} className="flex-1 text-center text-[9px] text-sky-400 font-mono font-bold leading-[20px]">{isFuture ? '-' : colSum}</div>
@@ -1071,7 +1097,7 @@
                                          const isFuture = isFutureDate(targetDate);
                                          const colSum = isFuture ? 0 : gridData.grid.reduce((acc, row, hIdx) => {
                                              const cellTimeMs = gridData.headers[dIdx].getTime() + (hIdx * 3600000);
-                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx];
+                                             if (cellTimeMs >= gridData.activeStartMs && cellTimeMs < gridData.activeEndMs) return acc + row[dIdx].total;
                                              return acc;
                                          }, 0);
                                          const stats = getHistoricalStats(targetDate, colSum, dIdx);
